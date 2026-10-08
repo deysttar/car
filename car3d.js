@@ -288,7 +288,8 @@ export class Showroom {
     this.renderer = renderer;
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.Fog('#f3c9a1', 45, 140);
+    scene.background = new THREE.Color('#2b2d32');
+    scene.fog = new THREE.Fog('#2b2d32', 70, 140);
     this.scene = scene;
 
     const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 400);
@@ -305,28 +306,16 @@ export class Showroom {
     controls.enablePan = false;
     this.controls = controls;
 
-    // Cielo low poly con degradado
-    const skyGeo = new THREE.SphereGeometry(200, 16, 10);
-    const cols = [];
-    const top = new THREE.Color('#5d93c4'), mid = new THREE.Color('#f4b98a'), low = new THREE.Color('#f7d7b0');
-    const pos = skyGeo.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-      const y = pos.getY(i) / 200;
-      const c = y > 0.15 ? mid.clone().lerp(top, Math.min(1, (y - 0.15) / 0.6)) : low.clone().lerp(mid, Math.max(0, (y + 0.2) / 0.35));
-      cols.push(c.r, c.g, c.b);
-    }
-    skyGeo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
-    scene.add(new THREE.Mesh(skyGeo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false })));
 
-    scene.add(new THREE.HemisphereLight('#ffe8cc', '#4f6b3a', 1.1));
-    const sun = new THREE.DirectionalLight('#fff0d9', 2.4);
+    scene.add(new THREE.HemisphereLight('#e8eef5', '#5a564f', 1.5));
+    const sun = new THREE.DirectionalLight('#fff4e2', 2.0);
     sun.position.set(-8, 14, 6);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
     const sc = sun.shadow.camera; sc.left = -10; sc.right = 10; sc.top = 10; sc.bottom = -10; sc.near = 1; sc.far = 40;
     sun.shadow.bias = -0.0005;
     scene.add(sun);
-    const rim = new THREE.DirectionalLight('#ffb27a', 0.8);
+    const rim = new THREE.DirectionalLight('#9fc4ff', 0.6);
     rim.position.set(8, 4, -8);
     scene.add(rim);
 
@@ -352,23 +341,44 @@ export class Showroom {
   buildWorld() {
     const scene = this.scene;
     const r = mulberry32(77);
-    // Suelo
-    const groundGeo = new THREE.CircleGeometry(120, 40, 0, Math.PI * 2);
-    groundGeo.rotateX(-Math.PI / 2);
-    const gp = groundGeo.attributes.position;
-    for (let i = 0; i < gp.count; i++) {
-      const x = gp.getX(i), z = gp.getZ(i);
-      const d = Math.hypot(x, z);
-      if (d > 14) gp.setY(i, (r() - 0.3) * Math.min(2.5, (d - 14) * 0.08));
-    }
-    groundGeo.computeVertexNormals();
-    const ground = new THREE.Mesh(groundGeo, mat('#7fa456', { roughness: 1 }));
-    ground.receiveShadow = true;
-    scene.add(ground);
+    // ===== Interior de la fábrica: nave de montaje =====
+    const R = 32, H = 16;
+    const env = new THREE.Group();
+    const steel = mat('#9aa1ab', { roughness: 0.5, metalness: 0.3 }), dark = mat('#2b2f35'), orange = mat('#ff6a1a', { roughness: 0.5 });
+    const yellow = mat('#ffb627', { roughness: 0.7 });
+    const glassM = new THREE.MeshStandardMaterial({ color: '#8cc3d9', emissive: '#3b7fa0', emissiveIntensity: 0.7, roughness: 0.2, flatShading: true });
+    const lampM = new THREE.MeshStandardMaterial({ color: '#fff6df', emissive: '#fff0c8', emissiveIntensity: 1.4 });
 
-    // Mar (la bahía) en un lado
-    const sea = new THREE.Mesh(new THREE.CircleGeometry(90, 24), mat('#3f86a8', { roughness: 0.3, metalness: 0.1 }));
-    sea.rotation.x = -Math.PI / 2; sea.position.set(30, 0.05, -95); scene.add(sea);
+    // Suelo de resina con juntas y líneas de seguridad
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(2 * R, 2 * R).rotateX(-Math.PI / 2), mat('#6d7077', { roughness: 0.35, metalness: 0.12 }));
+    floor.receiveShadow = true; scene.add(floor);
+    const joint = mat('#585b61');
+    for (let i = -3; i <= 3; i++) { env.add(box(2 * R, 0.01, 0.08, joint, 0, 0.01, i * 8)); env.add(box(0.08, 0.01, 2 * R, joint, i * 8, 0.01, 0)); }
+    for (const s of [-1, 1]) { env.add(box(2 * R - 4, 0.02, 0.3, yellow, 0, 0.02, s * (R - 2))); env.add(box(0.3, 0.02, 2 * R - 4, yellow, s * (R - 2), 0.02, 0)); }
+    const hazard = new THREE.Mesh(new THREE.RingGeometry(14.6, 15, 48).rotateX(-Math.PI / 2), yellow);
+    hazard.position.y = 0.04; env.add(hazard);
+
+    // Paredes con zócalo, franja naranja, ventanales altos y pilastras
+    const wallM = mat('#cbc7bb', { roughness: 1 }), dado = mat('#454b53'), pil = mat('#aeb0b3');
+    const wall = (x, z, ry) => {
+      const g = new THREE.Group();
+      g.add(box(2 * R, H, 0.6, wallM, 0, H / 2, 0));
+      g.add(box(2 * R, 3, 0.7, dado, 0, 1.5, 0.05));
+      g.add(box(2 * R, 0.35, 0.72, orange, 0, 3.2, 0.06));
+      for (let i = -R + 5; i < R - 2; i += 8) g.add(box(5.5, 2.4, 0.1, glassM, i, 12, 0.32));
+      for (let i = -R; i <= R; i += 16) g.add(box(1, H, 1.2, pil, i, H / 2, 0.5));
+      g.position.set(x, 0, z); g.rotation.y = ry; env.add(g);
+    };
+    wall(0, -R, 0); wall(0, R, Math.PI); wall(-R, 0, Math.PI / 2); wall(R, 0, -Math.PI / 2);
+
+    // Techo con cerchas y lámparas
+    env.add(box(2 * R + 1, 0.5, 2 * R + 1, mat('#2f3238'), 0, H + 0.25, 0));
+    for (let i = -3; i <= 3; i++) env.add(box(0.6, 0.9, 2 * R, steel, i * 9, H - 0.5, 0));
+    for (let j = -2; j <= 2; j++) env.add(box(2 * R, 0.6, 0.5, steel, 0, H - 0.4, j * 14));
+    for (const x of [-18, -6, 6, 18]) for (const z of [-20, -7, 7, 20]) {
+      const rod = cyl(0.04, 0.04, 1.6, 4, dark); rod.position.set(x, H - 1.3, z); env.add(rod);
+      env.add(box(2.6, 0.22, 0.9, lampM, x, H - 2.2, z));
+    }
 
     // Plataforma / podio
     const plat = cyl(4.2, 4.5, 0.35, 18, mat('#e9e1d2', { roughness: 0.9 }));
@@ -380,50 +390,97 @@ export class Showroom {
     ring.rotation.x = Math.PI / 2; ring.position.y = 0.08; scene.add(ring);
     this.ring = ring;
 
-    // Montes y árboles
-    const hills = ['#5f8a45', '#6b9a4c', '#517a3c', '#7aa556'];
-    for (let i = 0; i < 26; i++) {
-      const a = (i / 26) * Math.PI * 2 + r() * 0.2;
-      if (a > 4.4 && a < 5.3) continue; // hueco hacia el mar
-      const d = 55 + r() * 35;
-      const h = 8 + r() * 18;
-      const m = new THREE.Mesh(new THREE.ConeGeometry(10 + r() * 12, h, 5 + Math.floor(r() * 3)), mat(hills[i % hills.length], { roughness: 1 }));
-      m.position.set(Math.cos(a) * d, h / 2 - 0.5, Math.sin(a) * d);
-      m.rotation.y = r() * 3;
-      scene.add(m);
+    // ---- Equipamiento del taller ----
+    const rand = r;
+    const place = (g, x, z, ry = 0) => { g.position.set(x, 0, z); g.rotation.y = ry; env.add(g); return g; };
+    const spec = (typeId, color, i) => buildCar({ typeId, engineId: 'e9', intakeId: 'i4', turboId: 't0', tractionId: 'TT', aeroId: 'a50', perf: 90, color, seed: 21 + i });
+
+    // Línea de montaje con coches que avanzan
+    env.add(box(2 * R - 6, 0.5, 5.4, mat('#3a3e45', { roughness: 0.6 }), 0, 0.25, -19));
+    for (const s of [-1, 1]) env.add(box(2 * R - 6, 0.08, 0.25, yellow, 0, 0.52, -19 + s * 2.6));
+    for (let i = -14; i <= 14; i++) env.add(box(0.28, 0.04, 5, mat('#50555d', { metalness: 0.4 }), i * 2, 0.52, -19));
+    this.line = [];
+    const lineTypes = ['turismo', 'suv', 'coupe', 'utilitario', 'pickup', 'deportivo'];
+    const lineCols = ['#c8483c', '#e8e2d4', '#3f86a8', '#e0b043', '#4f8a6a', '#8a95a3'];
+    for (let i = 0; i < 6; i++) { const c = spec(lineTypes[i], lineCols[i], i); c.position.set(-26 + i * 9.4, 0.56, -19); env.add(c); this.line.push(c); }
+
+    // Brazos robóticos sobre la línea
+    this.robots = [];
+    for (let i = 0; i < 6; i++) {
+      const g = new THREE.Group();
+      const base = cyl(1, 1.25, 0.6, 10, steel); base.position.y = 0.3; g.add(base);
+      const turret = new THREE.Group(); turret.position.y = 0.6; g.add(turret);
+      const col = cyl(0.75, 0.75, 1.2, 10, orange); col.position.y = 0.6; turret.add(col);
+      const lower = new THREE.Group(); lower.position.y = 1.2; turret.add(lower);
+      lower.add(box(0.5, 3.2, 0.5, orange, 0, 1.6, 0));
+      const upper = new THREE.Group(); upper.position.y = 3.2; lower.add(upper);
+      upper.add(box(0.4, 2.8, 0.4, orange, 0, 1.4, 0));
+      upper.add(box(0.55, 0.5, 0.9, dark, 0, 2.9, 0.1));
+      place(g, -22.5 + i * 9, -24.2); this.robots.push({ turret, lower, upper });
     }
-    const leaf = [mat('#3f6e34'), mat('#4f8a3c'), mat('#2f5a2c')];
-    const trunk = mat('#7a5232');
-    for (let i = 0; i < 60; i++) {
-      const a = r() * Math.PI * 2;
-      const d = 9 + r() * 32;
-      const x = Math.cos(a) * d, z = Math.sin(a) * d;
-      if (x > 0 && z > 0 && d < 26) continue; // deja libre la vista de la cámara
-      const t = new THREE.Group();
-      const tr = cyl(0.12, 0.16, 0.8, 5, trunk); tr.position.y = 0.4; t.add(tr);
-      const s = 0.8 + r() * 0.9;
-      const c1 = new THREE.Mesh(new THREE.ConeGeometry(0.9 * s, 1.8 * s, 6), leaf[i % 3]); c1.position.y = 0.8 + 0.9 * s; c1.castShadow = true; t.add(c1);
-      if (r() < 0.6) { const c2 = new THREE.Mesh(new THREE.ConeGeometry(0.65 * s, 1.3 * s, 6), leaf[(i + 1) % 3]); c2.position.y = 0.8 + 1.8 * s; c2.castShadow = true; t.add(c2); }
-      t.position.set(x, 0, z);
-      t.rotation.y = r() * 3;
-      scene.add(t);
-    }
-    // rocas
-    for (let i = 0; i < 18; i++) {
-      const a = Math.PI * (0.55 + r() * 1.6), d = 7 + r() * 20;
-      const m = new THREE.Mesh(new THREE.DodecahedronGeometry(0.3 + r() * 0.6, 0), mat('#9b968c'));
-      m.position.set(Math.cos(a) * d, 0.15, Math.sin(a) * d); m.rotation.set(r(), r(), r()); m.castShadow = true;
-      scene.add(m);
-    }
-    // nubes
+
+    // Puente grúa
+    const crane = new THREE.Group();
+    for (const s of [-1, 1]) env.add(box(0.5, 0.6, 2 * R - 2, yellow, s * 27, 13, 0));
+    crane.add(box(55, 0.9, 1.1, yellow, 0, 13, 0));
+    crane.add(box(1.6, 0.7, 1.6, dark, 4, 12.4, 0));
+    const cable = cyl(0.05, 0.05, 6, 4, dark); cable.position.set(4, 9, 0); crane.add(cable);
+    crane.add(box(0.7, 0.8, 0.7, orange, 4, 5.8, 0));
+    crane.position.z = -6; env.add(crane); this.crane = crane;
+
+    // Elevadores con coches en revisión (pared izquierda)
+    [['pickup', '#e0b043', -9], ['coupe', '#c8483c', 3], ['suv', '#3f86a8', 15]].forEach(([t, col, z], i) => {
+      const g = new THREE.Group();
+      for (const s of [-1, 1]) { g.add(box(0.45, 4.2, 0.55, orange, s * 1.7, 2.1, 0)); g.add(box(0.3, 0.2, 4.2, steel, s * 0.8, 1.55, 0)); }
+      g.add(box(3.9, 0.3, 0.6, dark, 0, 4.3, 0));
+      const c = spec(t, col, 10 + i); c.rotation.y = Math.PI / 2; c.position.y = 1.7; g.add(c);
+      g.add(box(4, 0.02, 7, yellow, 0, 0.03, 0).translateY(0));
+      place(g, -24.5, z);
+    });
+
+    // Bancos de trabajo con cajas de herramientas y motores (pared derecha)
+    const bench = () => {
+      const g = new THREE.Group();
+      g.add(box(4, 0.15, 1.4, mat('#a9835a'), 0, 1, 0));
+      for (const sx of [-1.8, 1.8]) for (const sz of [-0.55, 0.55]) g.add(box(0.12, 1, 0.12, dark, sx, 0.5, sz));
+      g.add(box(1.3, 0.95, 0.9, mat('#c8483c'), -1.2, 0.48, 0));
+      for (let n = 0; n < 3; n++) g.add(box(1.25, 0.05, 0.02, dark, -1.2, 0.25 + n * 0.3, 0.46));
+      g.add(box(1.1, 0.5, 0.55, mat('#8a8f98'), 0.9, 1.35, 0));
+      for (let n = 0; n < 4; n++) { const p = cyl(0.12, 0.12, 0.3, 6, mat('#5d636c')); p.position.set(0.55 + n * 0.33, 1.75, 0); g.add(p); }
+      return g;
+    };
+    for (let i = 0; i < 6; i++) place(bench(), R - 2.2, -22 + i * 9, -Math.PI / 2);
+
+    // Estanterías con piezas (pared frontal)
+    const boxCols = ['#b88a55', '#c9a46a', '#7f8791', '#3f6e9a'];
+    const rack = () => {
+      const g = new THREE.Group(), blue = mat('#2f5f9a');
+      for (const sx of [-1.8, 1.8]) for (const sz of [-0.55, 0.55]) g.add(box(0.15, 5, 0.15, blue, sx, 2.5, sz));
+      for (let s = 0; s < 3; s++) {
+        g.add(box(3.8, 0.1, 1.3, orange, 0, 0.6 + s * 1.7, 0));
+        for (let n = 0; n < 3; n++) { const h = 0.8 + rand() * 0.3; g.add(box(0.7 + rand() * 0.4, h, 0.8, mat(boxCols[Math.floor(rand() * boxCols.length)]), -1.2 + n * 1.2, 0.65 + s * 1.7 + h / 2, 0)); }
+      }
+      return g;
+    };
+    for (let i = 0; i < 5; i++) place(rack(), -20 + i * 9, R - 1.6, Math.PI);
+
+    // Cartel y portón en la pared del fondo
+    const cv = document.createElement('canvas'); cv.width = 1024; cv.height = 160;
+    const cx = cv.getContext('2d'); cx.fillStyle = '#1d1a17'; cx.fillRect(0, 0, 1024, 160);
+    cx.fillStyle = '#ff6a1a'; cx.fillRect(0, 0, 1024, 12); cx.fillRect(0, 148, 1024, 12);
+    cx.fillStyle = '#f6f0e6'; cx.font = '700 92px "Clash Display", "Segoe UI", sans-serif'; cx.textAlign = 'center'; cx.textBaseline = 'middle';
+    cx.fillText('RULETA MOTORS', 512, 84);
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(22, 3.4), new THREE.MeshBasicMaterial({ map: tex }));
+    sign.position.set(-6, 9.2, -R + 0.42); env.add(sign);
+    env.add(box(22.6, 4, 0.3, dark, -6, 9.2, -R + 0.3));
+    env.add(box(9, 8, 0.2, mat('#8a96a3', { metalness: 0.3 }), 21, 4, -R + 0.45));
+    for (let n = 0; n < 8; n++) env.add(box(9, 0.06, 0.05, dark, 21, 0.5 + n, -R + 0.58));
+
+    // el fondo no proyecta sombras (solo el coche y la plataforma)
+    env.traverse((o) => { if (o.isMesh) o.castShadow = false; });
+    scene.add(env);
     this.clouds = [];
-    const cm = mat('#fff7ee', { roughness: 1 });
-    for (let i = 0; i < 8; i++) {
-      const c = new THREE.Group();
-      for (let j = 0; j < 3; j++) { const p = new THREE.Mesh(new THREE.IcosahedronGeometry(2 + r() * 2, 0), cm); p.position.set(j * 2.6, r(), r()); c.add(p); }
-      c.position.set(-80 + r() * 160, 28 + r() * 14, -60 + r() * 50);
-      scene.add(c); this.clouds.push(c);
-    }
   }
 
   resize() {
@@ -540,6 +597,14 @@ export class Showroom {
       if (p.userData.life <= 0 || p.position.y < 0) { this.scene.remove(p); p.geometry.dispose(); this.particles.splice(i, 1); }
     }
     for (const c of this.clouds) { c.position.x += dt * 0.6; if (c.position.x > 90) c.position.x = -90; }
+    for (const c of this.line) { c.position.x += dt * 0.7; if (c.position.x > 28) c.position.x -= 56; }
+    this.robots.forEach((r, i) => {
+      const t = this.time * 1.3 + i * 1.1;
+      r.turret.rotation.y = Math.sin(t * 0.7) * 0.35;
+      r.lower.rotation.x = 0.55 + Math.sin(t) * 0.25;
+      r.upper.rotation.x = 1.15 + Math.sin(t * 1.4 + 1) * 0.35;
+    });
+    this.crane.position.z = -6 + Math.sin(this.time * 0.18) * 16;
     this.controls.update();
   }
 

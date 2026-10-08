@@ -1,7 +1,7 @@
 import { Showroom } from './car3d.js';
 import {
   rollBuild, rollStage, buildFromPicks, rerollCost, stats, parts, byId, ratingLabel, rarityOf, newState, simulateDay, estimateDaily,
-  allActive, spinCost, modelName, FIXED_DAILY, PER_MODEL_DAILY,
+  allActive, spinCost, modelName, FIXED_DAILY, PER_MODEL_DAILY, weightedPick, rand,
 } from './sim.js';
 import { RARITY, ENGINES, INTAKES, TURBOS, TRACTIONS, AEROS, CAR_TYPES, PERF_MIN, PERF_MAX } from './data.js';
 
@@ -45,7 +45,429 @@ const engineRev = () => { sfx(90, 0.6, 'sawtooth', 0.05, 160); };
 
 // ---------- Estado ----------
 let state = newState('Ameztoy Motors');
-let ui = { tab: 'ruleta', selected: null, spinning: false, lastResult: null, launchPrice: {}, reportOpen: false, build: null };
+let ui = { tab: 'ruleta', selected: null, spinning: false, lastResult: null, launchPrice: {}, reportOpen: false, build: null, garageFilter: 'prototipo', garageSort: 'reciente', verBuild: null };
+
+// ---------- Versiones ----------
+// Costes de investigación
+const VER_PERF_COST  = 120000;  // Prima inicial para abrir V-R
+const VER_FULL_COST  = 320000;  // Prima inicial para abrir V-C
+
+// Piezas que puede cambiar la versión completa (mismo orden que la ruleta)
+const VER_FULL_REELS = [
+  { key: 'engine',   label: 'Motor',          list: ENGINES,   fmt: (x) => [x.name, '×' + nf2.format(x.power) + ' · ' + x.space + ' esp'] },
+  { key: 'intake',   label: 'Cilindrada',      list: INTAKES,   fmt: (x) => [x.name, '×' + nf2.format(x.mult) + ' · ' + x.space + ' esp'] },
+  { key: 'turbo',    label: 'Sobrealim.',      list: TURBOS,    fmt: (x) => [x.name, '×' + nf2.format(x.mult) + ' · ' + x.space + ' esp'] },
+  { key: 'traction', label: 'Tracción',        list: TRACTIONS, fmt: (x) => [x.name, 'agarre ' + x.grip + ' · acel ' + x.accel] },
+  { key: 'aero',     label: 'Aerodinámica',    list: AEROS,     fmt: (x) => [x.name, 'agarre ×' + x.grip] },
+  { key: 'perf',     label: 'Rendimiento',     list: null,      fmt: (x) => [String(x), x >= 120 ? 'obra maestra' : x >= 100 ? 'fino' : x >= 80 ? 'normal' : 'flojo'] },
+];
+const VER_PERF_REEL = [
+  { key: 'perf', label: 'Rendimiento', list: null, fmt: (x) => [String(x), x >= 120 ? 'obra maestra' : x >= 100 ? 'fino' : x >= 80 ? 'normal' : 'flojo'] },
+];
+
+// Coste de rerun en versión (base propio, se duplica por nº de reruns en la SESIÓN de ese día)
+const VER_REROLL_BASE = { engine: 40000, intake: 30000, turbo: 30000, traction: 15000, aero: 15000, perf: 35000 };
+const verRerollCost = (key, n) => VER_REROLL_BASE[key] * Math.pow(2, n);
+
+// Devuelve la lista filtrada para una pieza de versión completa (respeta espacio)
+function rollVerStage(key, picks, origCar) {
+  const p = parts(origCar);
+  // Tomar lo que ya está en picks o lo original si no se ha tirado todavía
+  const eff = (k) => picks[k] !== undefined ? picks[k] : (k === 'perf' ? origCar.perf : p[k]);
+  switch (key) {
+    case 'engine': {
+      const typeSpace = p.type.space;
+      const minIntake = Math.min(...INTAKES.map((i) => i.space));
+      return weightedPick(ENGINES.filter((e) => e.space + minIntake <= typeSpace));
+    }
+    case 'intake': {
+      const eng = eff('engine');
+      const turbo = p.turbo; // aún no tirado
+      return weightedPick(INTAKES.filter((i) => i.space <= p.type.space - eng.space - turbo.space));
+    }
+    case 'turbo': {
+      const eng = eff('engine');
+      const intk = eff('intake');
+      return weightedPick(TURBOS.filter((t) => t.space <= p.type.space - eng.space - intk.space));
+    }
+    case 'traction': return weightedPick(TRACTIONS);
+    case 'aero': return weightedPick(AEROS);
+    default: return Math.round(PERF_MIN + ((rand() + rand()) / 2) * (PERF_MAX - PERF_MIN));
+  }
+}
+
+// Abre el modal de selección de tipo de versión
+function openVersionModal(car) {
+  if (ui.verBuild && ui.verBuild.carId === car.id) {
+    // Ya hay una sesión abierta para este coche → abrir directamente
+    openVersionRuleta(car);
+    return;
+  }
+  const s = stats(car);
+  const hasCash = (cost) => state.cash >= cost;
+  openModal(`
+    <h2 class="modal-title">Desarrollar versión</h2>
+    <p class="modal-sub">Elige el tipo de actualización para <b>${esc(car.name)}</b>.</p>
+    <div class="ver-orig">
+      <div>
+        <div class="ver-orig-name">${esc(car.name)}</div>
+        <div class="ver-orig-sub">${s.p.type.name} · ${nf0.format(s.hp)} CV · Rendimiento <b>${car.perf}</b></div>
+      </div>
+      ${ratingBadge(s.rating)}
+    </div>
+    <div class="ver-options">
+      <button class="ver-card" id="verOptR" ${!hasCash(VER_PERF_COST) ? 'disabled' : ''}>
+        <span class="ver-badge">V-R · Rendimiento</span>
+        <span class="ver-title">Mejora de<br>rendimiento</span>
+        <span class="ver-price">Investigación: <b>${eur(VER_PERF_COST)}</b></span>
+        <span class="ver-scope">Solo ruleta de rendimiento.<br>Debe superar el original (${car.perf}).</span>
+      </button>
+      <button class="ver-card" id="verOptF" ${!hasCash(VER_FULL_COST) ? 'disabled' : ''}>
+        <span class="ver-badge ver-badge-pro">V-C · Completa</span>
+        <span class="ver-title">Revisión<br>completa</span>
+        <span class="ver-price">Investigación: <b>${eur(VER_FULL_COST)}</b></span>
+        <span class="ver-scope">Motor, cilindrada, turbo, tracción, aero y rendimiento.</span>
+      </button>
+    </div>
+    ${!hasCash(VER_PERF_COST) ? '<div class="spin-note" style="margin-top:10px">Necesitas más caja para investigar una versión.</div>' : ''}
+    <div class="actions" style="margin-top:14px"><div class="row">
+      <button class="btn" id="mCancel">Cancelar</button>
+    </div></div>`, () => {
+    $('#mCancel').onclick = closeModal;
+    const btnR = $('#verOptR'), btnF = $('#verOptF');
+    if (btnR && !btnR.disabled) btnR.onclick = () => startVersion(car, 'perf');
+    if (btnF && !btnF.disabled) btnF.onclick = () => startVersion(car, 'full');
+  });
+}
+
+// Inicia una sesión de versión (paga la prima)
+function startVersion(car, type) {
+  const cost = type === 'perf' ? VER_PERF_COST : VER_FULL_COST;
+  if (state.cash < cost) return toast('No tienes caja para iniciar la investigación.');
+  state.cash -= cost;
+  const reels = type === 'perf' ? VER_PERF_REEL : VER_FULL_REELS;
+  ui.verBuild = {
+    carId: car.id,
+    type,               // 'perf' | 'full'
+    stage: 0,           // índice en reels
+    phase: 'ready',     // ready | spinning | decide
+    picks: {},          // resultado de cada pieza
+    rerolls: {},        // nº de reruns en la sesión de hoy
+    lastRerollDay: state.day,  // día en que se abrió la sesión (para reiniciar precios)
+  };
+  renderTop();
+  closeModal();
+  openVersionRuleta(car);
+}
+
+// Abre el modal de la ruleta de versión (sesión ya existente)
+function openVersionRuleta(car) {
+  const vb = ui.verBuild;
+  if (!vb || vb.carId !== car.id) return;
+  const reels = vb.type === 'perf' ? VER_PERF_REEL : VER_FULL_REELS;
+  // Si hoy es un día distinto al que se abrió, reiniciar precios de rerun
+  if (state.day !== vb.lastRerollDay) {
+    vb.rerolls = {};
+    vb.lastRerollDay = state.day;
+  }
+  const s = stats(car);
+  const cur = reels[Math.min(vb.stage, reels.length - 1)];
+  const isComplete = vb.stage >= reels.length;
+
+  // Calcular comparación si ya se ha tirado el rendimiento
+  let statusHtml = '';
+  if (vb.type === 'perf') {
+    if (vb.picks.perf !== undefined) {
+      const better = vb.picks.perf > car.perf;
+      statusHtml = `
+        <div class="ver-compare">
+          <span class="orig">Rendimiento original<br><b>${car.perf}</b></span>
+          <span class="arrow">→</span>
+          <span class="new ${better ? 'better' : 'worse'}">Nuevo<br>${vb.picks.perf}</span>
+        </div>
+        <div class="ver-status ${better ? 'ok' : 'nok'}">${better ? '✓ Supera el original — puedes finalizar' : '✗ No supera el original — debes repetir o cerrar'}</div>`;
+    } else {
+      statusHtml = `<div class="ver-goal">Meta: superar rendimiento <b>${car.perf}</b></div>`;
+    }
+  } else {
+    // Versión completa: mostrar comparación de piezas ya tiradas
+    const origP = parts(car);
+    const origStats = s;
+    // construir un coche temporal con las piezas nuevas
+    const tmpCar = {
+      ...car,
+      engineId:   vb.picks.engine   ? vb.picks.engine.id   : car.engineId,
+      intakeId:   vb.picks.intake   ? vb.picks.intake.id   : car.intakeId,
+      turboId:    vb.picks.turbo    ? vb.picks.turbo.id    : car.turboId,
+      tractionId: vb.picks.traction ? vb.picks.traction.id : car.tractionId,
+      aeroId:     vb.picks.aero     ? vb.picks.aero.id     : car.aeroId,
+      perf:       vb.picks.perf     !== undefined ? vb.picks.perf : car.perf,
+    };
+    const tmpS = stats(tmpCar);
+    const hpBetter = tmpS.hp > origStats.hp;
+    statusHtml = `<div class="ver-compare">
+      <span class="orig">${nf0.format(origStats.hp)} CV<br><small>original</small></span>
+      <span class="arrow">→</span>
+      <span class="new ${hpBetter ? 'better' : (tmpS.hp < origStats.hp ? 'worse' : '')}">${nf0.format(tmpS.hp)} CV<br><small>proyectado</small></span>
+    </div>`;
+  }
+
+  let controlsHtml = '';
+  if (!isComplete) {
+    const r = reels[vb.stage];
+    if (vb.phase === 'ready') {
+      controlsHtml = `<button class="btn btn-primary btn-block spin-btn" id="verSpinBtn">Girar ${r.label.toLowerCase()}</button>`;
+    } else if (vb.phase === 'decide') {
+      const val = vb.picks[r.key];
+      const rcost = verRerollCost(r.key, vb.rerolls[r.key] || 0);
+      const last = vb.stage === reels.length - 1;
+      // Para V-R: el botón de finalizar solo se activa si supera el original
+      const canFinish = vb.type === 'perf' ? vb.picks.perf > car.perf : true;
+      const finishLabel = vb.type === 'perf'
+        ? (canFinish ? `Finalizar con rendimiento ${vb.picks.perf}` : `Rendimiento ${vb.picks.perf} — no supera (debe ser > ${car.perf})`)
+        : (last ? `Finalizar con ${esc(r.fmt(val)[0])}` : `Quedarme con ${esc(r.fmt(val)[0])}`);
+      controlsHtml = `
+        <button class="btn btn-primary btn-block spin-btn" id="verKeepBtn" ${(last && !canFinish) ? 'disabled' : ''}>${finishLabel}</button>
+        <button class="btn btn-block" id="verRerollBtn" ${state.cash < rcost ? 'disabled' : ''}>Repetir ${r.label.toLowerCase()} · ${eur(rcost)}</button>
+        <div class="spin-note">Cada repetición cuesta el doble. Precios se reinician al día siguiente.</div>`;
+    }
+  } else {
+    // Completado: mostrar botones de finalizar / vender prototipo
+    const perf_ok = vb.type === 'perf' ? vb.picks.perf > car.perf : true;
+    if (perf_ok) {
+      controlsHtml = `
+        <div class="ver-status ok" style="margin-bottom:10px">✓ Investigación completa</div>
+        <button class="btn btn-primary btn-block" id="verFinishBtn">Lanzar desarrollo de la versión · ${eur(stats(car).launchCost)}</button>
+        <button class="btn btn-block" id="verSellBtn">Vender prototipo de versión · ${eur(Math.round(stats(car).collector * 0.6))}</button>`;
+    } else {
+      controlsHtml = `<div class="ver-status nok" style="margin-bottom:10px">✗ Rendimiento no supera el original</div>`;
+    }
+  }
+
+  openModal(`
+    <div class="ver-header">
+      <h2 class="modal-title">${vb.type === 'perf' ? 'Versión de Rendimiento' : 'Versión Completa'}</h2>
+      <span class="ver-badge ${vb.type === 'full' ? 'ver-badge-pro' : ''}">${vb.type === 'perf' ? 'V-R' : 'V-C'}</span>
+    </div>
+    <div class="ver-orig">
+      <div><div class="ver-orig-name">${esc(car.name)}</div>
+      <div class="ver-orig-sub">${s.p.type.name} · ${nf0.format(s.hp)} CV · Rend. ${car.perf}</div></div>
+      ${ratingBadge(s.rating)}
+    </div>
+    ${statusHtml}
+    <div class="reels" id="verReels" style="margin-bottom:12px">
+      ${reels.map((r) => {
+        const done = vb.picks[r.key] !== undefined;
+        const isCur = !isComplete && cur && cur.key === r.key;
+        let val = vb.picks[r.key];
+        let itemHtml = '<div class="reel-item" style="color:var(--faint);justify-content:center">—</div>';
+        if (done && val !== undefined) {
+          const tier = r.key === 'perf' ? perfTier(val) : val.tier;
+          const [a, b] = r.fmt(val);
+          itemHtml = `<div class="reel-item" style="color:${rc(tier)}">
+            <span>${esc(a)}</span><span class="meta" style="color:var(--muted)">${esc(b)}</span></div>`;
+        }
+        return `<div class="reel-row">
+          <span class="reel-label">${r.label}</span>
+          <div class="reel ${done ? 'done' : 'idle'} ${isCur ? 'current' : ''}" id="verReel-${r.key}" ${done ? `style="--rc:${rc(r.key === 'perf' && vb.picks.perf !== undefined ? perfTier(vb.picks.perf) : (vb.picks[r.key] ? vb.picks[r.key].tier : 1))}"` : ''}>
+            <div class="reel-strip">${itemHtml}</div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+    <div class="spin-area" id="verSpinArea" style="display:flex;flex-direction:column;gap:8px">
+      ${controlsHtml}
+    </div>
+    <div class="ver-cancel-note">Puedes cerrar y volver mañana (precios de repetición se reiniciarán).</div>
+    <div class="actions" style="margin-top:10px"><div class="row">
+      <button class="btn" id="verClose">Cerrar por hoy</button>
+      <button class="btn btn-danger" id="verAbort">Cancelar investigación</button>
+    </div></div>`, () => {
+
+    const btnSpin = $('#verSpinBtn');
+    if (btnSpin) btnSpin.onclick = () => spinVerStage(car);
+
+    const btnKeep = $('#verKeepBtn');
+    if (btnKeep) btnKeep.onclick = () => keepVerStage(car);
+
+    const btnReroll = $('#verRerollBtn');
+    if (btnReroll) btnReroll.onclick = () => rerollVerStage(car);
+
+    const btnFinish = $('#verFinishBtn');
+    if (btnFinish) btnFinish.onclick = () => finishVersion(car);
+
+    const btnSell = $('#verSellBtn');
+    if (btnSell) btnSell.onclick = () => sellVersionProto(car);
+
+    $('#verClose').onclick = () => { closeModal(); renderAll(); };
+    $('#verAbort').onclick = () => {
+      openModal(`<h2 class="modal-title">¿Cancelar investigación?</h2>
+        <p class="modal-sub">Perderás la prima pagada y todo el progreso actual de esta versión.</p>
+        <div class="actions"><div class="row">
+          <button class="btn" id="abortNo">Volver</button>
+          <button class="btn btn-danger" id="abortYes">Sí, cancelar</button>
+        </div></div>`, () => {
+        $('#abortNo').onclick = () => openVersionRuleta(car);
+        $('#abortYes').onclick = () => { ui.verBuild = null; closeModal(); renderAll(); toast('Investigación cancelada.'); };
+      });
+    };
+  });
+}
+
+async function spinVerStage(car) {
+  const vb = ui.verBuild;
+  if (!vb || vb.carId !== car.id || ui.spinning) return;
+  const reels = vb.type === 'perf' ? VER_PERF_REEL : VER_FULL_REELS;
+  const r = reels[vb.stage];
+  delete vb.picks[r.key];
+  // Generar valor
+  let val;
+  if (r.key === 'perf') {
+    val = Math.round(PERF_MIN + ((rand() + rand()) / 2) * (PERF_MAX - PERF_MIN));
+  } else {
+    val = rollVerStage(r.key, vb.picks, car);
+  }
+  ui.spinning = true; vb.phase = 'spinning';
+  show.setSpinning(true);
+  engineRev();
+  // Animar la reel dentro del modal
+  const el = $('#verReel-' + r.key);
+  if (el) {
+    el.classList.remove('idle', 'done');
+    const N = 14;
+    const items = [];
+    for (let i = 0; i < N; i++) {
+      items.push(r.list
+        ? r.list[Math.floor(Math.random() * r.list.length)]
+        : PERF_MIN + Math.floor(Math.random() * (PERF_MAX - PERF_MIN + 1)));
+    }
+    items.push(val);
+    el.innerHTML = `<div class="reel-strip">${items.map((x) => itemHTML(r, x)).join('')}</div>`;
+    const strip = el.firstElementChild;
+    const H = 38, dist = (items.length - 1) * H;
+    await new Promise((resolve) => {
+      const duration = window.__fastSpin ? 30 : 700;
+      const t0 = performance.now();
+      let lastIdx = -1;
+      function frame(now) {
+        const t = Math.min(1, (now - t0) / duration);
+        const e = 1 - Math.pow(1 - t, 3.4);
+        const y = e * dist;
+        strip.style.transform = `translateY(${-y}px)`;
+        const idx = Math.floor(y / H);
+        if (idx !== lastIdx) { lastIdx = idx; tick(); }
+        if (t < 1) requestAnimationFrame(frame); else resolve();
+      }
+      requestAnimationFrame(frame);
+    });
+  } else {
+    await new Promise((r) => setTimeout(r, window.__fastSpin ? 30 : 700));
+  }
+  vb.picks[r.key] = val; vb.phase = 'decide';
+  ui.spinning = false;
+  show.setSpinning(false);
+  reveal(r.key === 'perf' ? perfTier(val) : val.tier);
+  // Reabrir modal actualizado
+  closeModal();
+  openVersionRuleta(car);
+}
+
+function keepVerStage(car) {
+  const vb = ui.verBuild;
+  if (!vb || vb.carId !== car.id || ui.spinning) return;
+  const reels = vb.type === 'perf' ? VER_PERF_REEL : VER_FULL_REELS;
+  const r = reels[vb.stage];
+  // Para V-R: solo se puede finalizar si supera el original
+  if (vb.type === 'perf' && vb.picks.perf !== undefined && vb.picks.perf <= car.perf) {
+    toast('El rendimiento no supera al original. Debes repetir o cerrar por hoy.');
+    return;
+  }
+  vb.stage += 1; vb.phase = 'ready';
+  if (vb.stage >= reels.length) {
+    // Todas las piezas elegidas
+    closeModal();
+    openVersionRuleta(car);
+  } else {
+    closeModal();
+    openVersionRuleta(car);
+  }
+}
+
+function rerollVerStage(car) {
+  const vb = ui.verBuild;
+  if (!vb || vb.carId !== car.id || ui.spinning) return;
+  const reels = vb.type === 'perf' ? VER_PERF_REEL : VER_FULL_REELS;
+  const key = reels[vb.stage].key;
+  const cost = verRerollCost(key, vb.rerolls[key] || 0);
+  if (state.cash < cost) return toast('No tienes caja para repetir esta pieza.');
+  state.cash -= cost;
+  vb.rerolls[key] = (vb.rerolls[key] || 0) + 1;
+  cash();
+  renderTop();
+  closeModal();
+  spinVerStage(car);
+}
+
+function nextVersionName(car) {
+  const roman = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
+  const match = car.name.match(/^(.*?)(?:\s+Mk\s*([IVXLCDM]+|\d+))?$/i);
+  const baseName = (match ? match[1] : car.name).trim();
+  const currentNum = match && match[2] ? (roman.indexOf(match[2].toUpperCase()) + 1 || parseInt(match[2], 10)) : 1;
+  const nextNum = currentNum + 1;
+  const tag = roman[nextNum - 1] || String(nextNum);
+  return `${baseName} Mk ${tag}`;
+}
+
+function finishVersion(car) {
+  const vb = ui.verBuild;
+  if (!vb || vb.carId !== car.id) return;
+  const s = stats(car);
+  if (state.cash < s.launchCost) return toast('No tienes caja para el desarrollo. Vende algo o espera ventas.');
+  state.cash -= s.launchCost;
+  // Crear coche versión
+  const origP = parts(car);
+  const newCar = {
+    ...car,
+    id: 'c' + state.nextCarNo++,
+    name: nextVersionName(car),
+    status: 'prototipo',
+    createdDay: state.day,
+    unitsSold: 0, revenue: 0, profit: 0,
+    _origId: car.id,
+    _verType: vb.type,
+    engineId:   vb.picks.engine   ? vb.picks.engine.id   : car.engineId,
+    intakeId:   vb.picks.intake   ? vb.picks.intake.id   : car.intakeId,
+    turboId:    vb.picks.turbo    ? vb.picks.turbo.id    : car.turboId,
+    tractionId: vb.picks.traction ? vb.picks.traction.id : car.tractionId,
+    aeroId:     vb.picks.aero     ? vb.picks.aero.id     : car.aeroId,
+    perf:       vb.picks.perf     !== undefined ? vb.picks.perf : car.perf,
+  };
+  car._verCount = (car._verCount || 1) + 1;
+  state.garage.unshift(newCar);
+  ui.verBuild = null;
+  ui.selected = newCar.id;
+  ui.garageFilter = 'prototipo';
+  cash();
+  closeModal();
+  show.showCar(newCar, true);
+  renderAll();
+  const ns = stats(newCar);
+  toast(`¡${newCar.name} listo! ${nf0.format(ns.hp)} CV`);
+  if (ns.overallTier >= 4) toast('¡Leyenda! Puntuación ' + ns.rating);
+}
+
+function sellVersionProto(car) {
+  const vb = ui.verBuild;
+  if (!vb || vb.carId !== car.id) return;
+  const s = stats(car);
+  const val = Math.round(s.collector * 0.6);
+  state.cash += val;
+  ui.verBuild = null;
+  cash();
+  closeModal();
+  renderAll();
+  toast(`Prototipo de versión vendido por ${eurFull(val)}`);
+}
 
 const show = new Showroom($('#scene'));
 let debugOn = false;
@@ -278,33 +700,58 @@ function ratingBadge(r) {
 }
 
 // ---------- Garaje ----------
+const GARAGE_TABS = [
+  { key: 'prototipo', label: 'Prototipos', empty: 'No tienes prototipos. Gira la ruleta para montar uno.' },
+  { key: 'mercado', label: 'En venta', empty: 'No tienes coches en venta. Lanza un prototipo al mercado desde la pestaña Prototipos.' },
+  { key: 'retirado', label: 'Retirados', empty: 'Aquí aparecerán los coches que retires del mercado.' },
+];
+const GARAGE_SORTS = {
+  reciente: ['Más recientes', () => 0],
+  potencia: ['Más potentes', (a, b) => stats(b).hp - stats(a).hp],
+  puntuacion: ['Mejor puntuación', (a, b) => stats(b).rating - stats(a).rating],
+  ventas: ['Más vendidos', (a, b) => (b.unitsSold || 0) - (a.unitsSold || 0)],
+  beneficio: ['Más beneficio', (a, b) => (b.profit || 0) - (a.profit || 0)],
+};
+
 function renderGaraje() {
   const pane = $('#pane-garaje');
-  const cars = state.garage.filter((c) => c.status !== 'vendido');
-  if (!cars.length) {
-    pane.innerHTML = `<h2 class="pane-title">Garaje</h2><p class="pane-sub">Aquí aparecen los prototipos que monta la ruleta.</p>
-      <div class="empty"><b>Todavía no hay coches</b>Gira la ruleta para montar tu primer prototipo.</div>
-      <div class="actions"><button class="btn btn-primary" id="toSpin">Ir a la ruleta</button></div>`;
-    $('#toSpin').onclick = () => setTab('ruleta');
-    return;
-  }
-  const sel = state.garage.find((c) => c.id === ui.selected) || cars[0];
-  ui.selected = sel.id;
+  const live = state.garage.filter((c) => c.status !== 'vendido');
+  const count = (k) => live.filter((c) => c.status === k).length;
+  const tab = GARAGE_TABS.find((t) => t.key === ui.garageFilter) || GARAGE_TABS[0];
+  // "ventas" y "beneficio" solo tienen sentido con coches que ya han salido al mercado
+  const sorts = Object.entries(GARAGE_SORTS).filter(([k]) => tab.key !== 'prototipo' || (k !== 'ventas' && k !== 'beneficio'));
+  if (!sorts.some(([k]) => k === ui.garageSort)) ui.garageSort = 'reciente';
+  const cars = live.filter((c) => c.status === tab.key).sort(GARAGE_SORTS[ui.garageSort][1]);
+  const sel = cars.find((c) => c.id === ui.selected) || cars[0];
+  ui.selected = sel ? sel.id : null;
   pane.innerHTML = `<h2 class="pane-title">Garaje</h2>
-    <p class="pane-sub">${cars.filter((c) => c.status === 'prototipo').length} prototipos · ${cars.filter((c) => c.status === 'mercado').length} en venta</p>
-    <div class="car-list">${cars.map((c) => carItem(c, c.id === sel.id)).join('')}</div>
-    <div id="detail"></div>`;
+    <div class="chips" role="tablist">${GARAGE_TABS.map((t) => `<button class="chip ${t.key === tab.key ? 'active' : ''}" data-f="${t.key}">${t.label} <span class="count">${count(t.key)}</span></button>`).join('')}</div>
+    <div class="sort-row"><span>Ordenar</span><select id="garageSort">${sorts.map(([k, v]) => `<option value="${k}" ${k === ui.garageSort ? 'selected' : ''}>${v[0]}</option>`).join('')}</select></div>
+    ${cars.length ? `<div class="car-list">${cars.map((c) => carItem(c, sel && c.id === sel.id)).join('')}</div><div id="detail"></div>`
+      : `<div class="empty"><b>${tab.label}: vacío</b>${tab.empty}</div>${tab.key === 'prototipo' ? '<div class="actions"><button class="btn btn-primary" id="toSpin">Ir a la ruleta</button></div>' : ''}`}`;
+  pane.querySelectorAll('.chip').forEach((b) => (b.onclick = () => {
+    ui.garageFilter = b.dataset.f; ui.selected = null; renderGaraje();
+    const c = state.garage.find((x) => x.id === ui.selected);
+    if (c) show.showCar(c, true); else show.clearCar();
+    renderCarCard();
+  }));
+  $('#garageSort').onchange = (e) => { ui.garageSort = e.target.value; renderGaraje(); };
+  const ts = $('#toSpin'); if (ts) ts.onclick = () => setTab('ruleta');
   pane.querySelectorAll('.car-item').forEach((b) => (b.onclick = () => { ui.selected = b.dataset.id; selectCar(b.dataset.id); }));
-  renderDetail(sel);
+  if (sel) renderDetail(sel);
 }
 
 function carItem(c, selected) {
   const s = stats(c), p = s.p;
   const label = { prototipo: 'Prototipo', mercado: 'En venta', retirado: 'Retirado', vendido: 'Vendido' }[c.status];
+  const hasVerSession = ui.verBuild && ui.verBuild.carId === c.id;
+  const verTag = hasVerSession ? `<span class="status version">Invest.</span>` : '';
+  const mkMatch = c.name.match(/\bMk\s*([IVXLCDM]+|\d+)\b/i);
+  const mkBadge = mkMatch ? `<span style="font-size:11px;color:var(--r3);margin-left:4px">▲ ${mkMatch[0]}</span>` : '';
   return `<button class="car-item ${selected ? 'sel' : ''}" data-id="${c.id}">
     <span class="swatch" style="background:${c.color}">${typeIcon(p.type.id)}</span>
-    <span><div class="ci-name">${esc(c.name)}</div><div class="ci-sub">${p.type.name} · ${p.engine.name} · día ${c.createdDay}</div></span>
-    <span class="ci-right"><div class="ci-hp" style="color:${ratingColor(s.rating)}">${nf0.format(s.hp)} CV</div><span class="status ${c.status}">${label}</span></span>
+    <span><div class="ci-name">${esc(c.name)}${mkBadge}</div><div class="ci-sub">${p.type.name} · ${p.engine.name} · día ${c.createdDay}</div></span>
+    <span class="ci-right"><div class="ci-hp" style="color:${ratingColor(s.rating)}">${nf0.format(s.hp)} CV</div>${verTag || `<span class="status ${c.status}">${label}</span>`}</span>
   </button>`;
 }
 
@@ -319,6 +766,8 @@ function renderDetail(c) {
   let price = ui.launchPrice[c.id] ?? c.price ?? Math.round(s.value);
   price = Math.min(maxP, Math.max(minP, price));
   const est = estimateDaily(state, c, price);
+  const hasVerSession = ui.verBuild && ui.verBuild.carId === c.id;
+  const verBtnLabel = hasVerSession ? 'Continuar investigación de versión' : 'Desarrollar nueva versión';
   const statusBlock = c.status === 'prototipo' ? `
       <h3 class="sec">Sacar al mercado</h3>
       <div class="slider-row">
@@ -351,9 +800,14 @@ function renderDetail(c) {
       <div class="actions"><div class="row">
         <button class="btn" id="applyPrice">Aplicar precio</button>
         <button class="btn btn-danger" id="retireBtn">Retirar del mercado</button>
-      </div></div>` : `
+      </div>
+      <button class="btn btn-block" id="verBtn" style="border-color:rgba(79,168,255,0.4);color:var(--r3)">${verBtnLabel}</button>
+      </div>` : `
       <h3 class="sec">Retirado</h3>
-      <p class="ci-sub">Vendió ${nf0.format(c.unitsSold || 0)} unidades con ${eur(c.profit || 0)} de beneficio bruto.</p>`;
+      <p class="ci-sub">Vendió ${nf0.format(c.unitsSold || 0)} unidades con ${eur(c.profit || 0)} de beneficio bruto.</p>
+      <div class="actions">
+        <button class="btn btn-block" id="verBtn" style="border-color:rgba(79,168,255,0.4);color:var(--r3)">${verBtnLabel}</button>
+      </div>`;
 
   el.innerHTML = `<div class="detail">
     <div class="result-head">
@@ -394,14 +848,16 @@ function renderDetail(c) {
   const ap = $('#applyPrice');
   if (ap) ap.onclick = () => { c.price = +$('#priceRange').value; toast('Nuevo precio: ' + eurFull(c.price)); renderAll(); };
   const rb = $('#retireBtn');
-  if (rb) rb.onclick = () => { c.status = 'retirado'; toast(c.name + ' retirado del mercado'); renderAll(); };
+  if (rb) rb.onclick = () => { c.status = 'retirado'; ui.garageFilter = 'retirado'; toast(c.name + ' retirado del mercado'); renderAll(); };
+  const vb2 = $('#verBtn');
+  if (vb2) vb2.onclick = () => openVersionModal(c);
 }
 
 function launch(c, price) {
   const s = stats(c);
   if (state.cash < s.launchCost) return toast('No tienes caja suficiente.');
   state.cash -= s.launchCost;
-  c.status = 'mercado'; c.price = price; c.launchedDay = state.day;
+  c.status = 'mercado'; c.price = price; c.launchedDay = state.day; ui.garageFilter = 'mercado';
   state.prestige = Math.max(0, state.prestige + (s.rating - 50) / 8);
   cash();
   toast(`${c.name} sale al mercado a ${eurFull(price)}`);
@@ -413,7 +869,7 @@ function sellPrototype(c) {
   c.status = 'vendido';
   cash();
   toast(`Vendido a un coleccionista por ${eurFull(s.collector)}`);
-  const next = state.garage.find((x) => x.status !== 'vendido');
+  const next = state.garage.find((x) => x.status === c.status && x.id !== c.id) || state.garage.find((x) => x.status !== 'vendido');
   ui.selected = next ? next.id : null;
   if (next) show.showCar(next); else { show.clearCar(); }
   renderAll();

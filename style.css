@@ -249,3 +249,53 @@ details.tbl table { margin-top: 8px; }
 
 .reel.current { border-color: #ff6a1a; }
 .spin-area .btn + .btn { margin-top: 0; }
+
+.chips { display: flex; gap: 6px; margin: 8px 0 10px; }
+.chip { flex: 1; padding: 8px 6px; border-radius: 99px; border: 1px solid var(--border); background: var(--surface-2); color: var(--muted); font: 600 13px var(--font-body); cursor: pointer; transition: all 160ms var(--ease); }
+.chip:hover { background: var(--surface-3); color: var(--text); }
+.chip.active { background: var(--accent); border-color: var(--accent); color: #141210; }
+.chip .count { opacity: 0.75; margin-left: 2px; }
+.sort-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; font-size: 13px; color: var(--muted); }
+.sort-row select { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font: 500 13px var(--font-body); }
+.sort-row select option { background: #1a1714; }
+
+/* ---------- Version system ---------- */
+.ver-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+.ver-card {
+  display: flex; flex-direction: column; gap: 8px; padding: 16px;
+  border-radius: 12px; border: 2px solid var(--border); background: var(--surface-2);
+  text-align: left; cursor: pointer; transition: all 200ms var(--ease); position: relative; overflow: hidden;
+}
+.ver-card::before { content: ''; position: absolute; inset: 0; opacity: 0; background: radial-gradient(circle at top left, rgba(255,106,26,0.18), transparent 70%); transition: opacity 200ms; }
+.ver-card:hover { border-color: var(--accent); background: var(--surface-3); }
+.ver-card:hover::before { opacity: 1; }
+.ver-card:disabled { opacity: 0.4; cursor: not-allowed; }
+.ver-card:disabled:hover { border-color: var(--border); background: var(--surface-2); }
+.ver-card:disabled:hover::before { opacity: 0; }
+.ver-badge { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent); }
+.ver-title { font-family: var(--font-display); font-weight: 600; font-size: 18px; line-height: 1.1; }
+.ver-price { font-size: 13px; color: var(--muted); }
+.ver-scope { font-size: 12px; color: var(--faint); line-height: 1.5; }
+.ver-badge-pro { color: var(--r4); }
+
+.ver-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.ver-orig { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 10px; background: rgba(0,0,0,0.28); border: 1px solid var(--border); margin-bottom: 10px; }
+.ver-orig-name { font-weight: 700; font-size: 15px; }
+.ver-orig-sub { font-size: 12px; color: var(--muted); }
+.ver-goal { padding: 8px 12px; border-radius: 8px; background: rgba(255,106,26,0.1); border: 1px solid rgba(255,106,26,0.3); font-size: 13px; color: var(--accent); margin-bottom: 10px; }
+.ver-goal b { font-variant-numeric: tabular-nums; }
+.ver-status { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 8px; font-size: 13px; font-weight: 700; }
+.ver-status.ok { background: rgba(95,211,141,0.12); color: var(--good); border: 1px solid rgba(95,211,141,0.3); }
+.ver-status.nok { background: rgba(255,90,79,0.12); color: var(--bad); border: 1px solid rgba(255,90,79,0.25); }
+.ver-status.pending { background: rgba(255,182,39,0.1); color: var(--r4); border: 1px solid rgba(255,182,39,0.25); }
+
+.ver-compare { display: grid; grid-template-columns: 1fr auto 1fr; gap: 6px; align-items: center; margin: 10px 0; font-size: 13px; font-variant-numeric: tabular-nums; }
+.ver-compare .orig { text-align: right; color: var(--muted); }
+.ver-compare .arrow { color: var(--accent); font-size: 18px; }
+.ver-compare .new { text-align: left; font-weight: 700; }
+.ver-compare .new.better { color: var(--good); }
+.ver-compare .new.worse { color: var(--bad); }
+
+.ver-cancel-note { font-size: 12px; color: var(--faint); text-align: center; margin-top: 6px; }
+
+.status.version { background: rgba(79,168,255,0.16); color: var(--r3); }
