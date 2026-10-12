@@ -37,9 +37,13 @@
       <div class="kpi"><span class="kpi-label">Día</span><span class="kpi-value" id="kDay">1</span></div>
       <div class="kpi"><span class="kpi-label">Caja</span><span class="kpi-value" id="kCash">0</span></div>
       <div class="kpi hide-sm"><span class="kpi-label">Prestigio</span><span class="kpi-value" id="kPrestige">0</span></div>
-      <div class="kpi hide-sm"><span class="kpi-label">En venta</span><span class="kpi-value" id="kActive">0</span></div>
+      <div class="kpi hide-sm"><span class="kpi-label">Seguidores</span><span class="kpi-value" id="kFollowers">0</span></div>
+      <div class="kpi"><span class="kpi-label">Líneas</span><span class="kpi-value" id="kActive">0</span></div>
     </div>
     <div class="top-actions">
+      <button class="icon-btn" id="settingsBtn" aria-label="Ajustes" title="Ajustes">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
       <button class="icon-btn" id="muteBtn" aria-label="Silenciar sonido" title="Sonido">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path id="muteWave" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>
       </button>
@@ -50,17 +54,20 @@
   </header>
 
   <aside class="carcard" id="carCard" hidden></aside>
+  <aside class="req-reminder" id="reqReminder" hidden aria-live="polite"></aside>
 
-  <main class="panel" id="panel">
+  <main class="panel" id="panel" data-tab="ruleta">
     <nav class="tabs" role="tablist">
-      <button class="tab active" data-tab="ruleta" role="tab">Ruleta</button>
-      <button class="tab" data-tab="garaje" role="tab">Garaje <span class="count" id="garageCount">0</span></button>
-      <button class="tab" data-tab="mercado" role="tab">Mercado</button>
-      <button class="tab" data-tab="empresa" role="tab">Empresa</button>
+      <button class="tab active" data-tab="ruleta" role="tab"><svg class="tab-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M12 3v6M12 15v6M3 12h6M15 12h6"/></svg><span class="tab-l">Ruleta</span></button>
+      <button class="tab" data-tab="garaje" role="tab"><svg class="tab-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21V9l9-6 9 6v12"/><path d="M7 21v-8h10v8M7 17h10"/></svg><span class="tab-l">Garaje</span><span class="count" id="garageCount">0</span></button>
+      <button class="tab" data-tab="mercado" role="tab"><svg class="tab-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span class="tab-l">Mercado</span></button>
+      <button class="tab" data-tab="comunidad" role="tab"><svg class="tab-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14.5c2.4 0 4 1.5 4.6 4.5"/></svg><span class="tab-l">Comunidad</span><span class="count" id="commCount">0</span></button>
+      <button class="tab" data-tab="empresa" role="tab"><svg class="tab-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21V11l5 3V11l5 3V5h6v16z"/><path d="M2 21h20"/></svg><span class="tab-l">Empresa</span></button>
     </nav>
     <section class="tabpane" id="pane-ruleta"></section>
     <section class="tabpane" id="pane-garaje" hidden></section>
     <section class="tabpane" id="pane-mercado" hidden></section>
+    <section class="tabpane" id="pane-comunidad" hidden></section>
     <section class="tabpane" id="pane-empresa" hidden></section>
   </main>
 
@@ -79,16 +86,19 @@
         <input id="companyInput" maxlength="28" value="Ameztoy Motors" />
       </label>
       <button class="btn btn-primary btn-lg" id="startBtn">Abrir la fábrica</button>
+      <button class="btn btn-lg btn-ghost" id="continueBtn" hidden>Continuar partida guardada</button>
       <ul class="intro-tips">
         <li><b>1 coche gratis al día.</b> Repetir una pieza o montar un coche extra cuesta cada vez más.</li>
         <li><b>Espacio del chasis:</b> motor + cilindrada + turbo tienen que caber.</li>
         <li><b>Compite</b> con tres marcas rivales por las ventas de cada segmento.</li>
+        <li><b>La partida se guarda sola</b> al acabar cada día y tras cada decisión importante.</li>
       </ul>
     </div>
   </div>
 
   <div class="overlay" id="modal" hidden><div class="modal-card" id="modalCard"></div></div>
   <div class="toasts" id="toasts"></div>
+  <div class="notifs" id="notifs" aria-live="polite"></div>
 
   <script type="module" src="./main.js"></script>
 <script data-pplx-inline-edit>

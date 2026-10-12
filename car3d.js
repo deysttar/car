@@ -449,7 +449,25 @@ export class Showroom {
       for (let n = 0; n < 4; n++) { const p = cyl(0.12, 0.12, 0.3, 6, mat('#5d636c')); p.position.set(0.55 + n * 0.33, 1.75, 0); g.add(p); }
       return g;
     };
-    for (let i = 0; i < 6; i++) place(bench(), R - 2.2, -22 + i * 9, -Math.PI / 2);
+    for (let i = 0; i < 5; i++) place(bench(), R - 2.2, -13 + i * 9, -Math.PI / 2);
+
+    // Túneles industriales en los extremos de la línea: los coches entran por una
+    // puerta oscura (montaje) y salen por otra, en lugar de atravesar la pared.
+    const tunnel = (cx, dir) => {
+      const g = new THREE.Group();
+      const W = 6, D = 5, H = 7.5;
+      g.add(box(W, H, D, steel, 0, H / 2, 0));                      // cuerpo
+      g.add(box(W, 0.45, D + 0.15, orange, 0, 0.35, 0));            // zócalo de seguridad
+      g.add(box(W, 0.3, D + 0.15, orange, 0, H - 1.5, 0));         // franja alta
+      g.add(box(0.3, H - 1.5, D - 1.2, dark, dir * (W / 2), H / 2 - 0.2, 0)); // portal oscuro
+      for (const s of [-1, 1]) g.add(box(0.45, H - 1.3, 0.45, yellow, dir * (W / 2), (H - 1.5) / 2 + 0.6, s * ((D - 1.2) / 2))); // jambas
+      g.add(box(0.45, 0.45, D - 0.6, yellow, dir * (W / 2), H - 0.85, 0)); // dintel
+      g.add(box(W - 0.8, 0.3, 1.6, glassM, 0, H + 0.15, 0));       // lucernario
+      g.position.set(cx, 0, -19);
+      env.add(g);
+    };
+    tunnel(-29, 1); // entrada de montaje: el portal mira hacia la nave
+    tunnel(29, -1); // bahía de salida
 
     // Estanterías con piezas (pared frontal)
     const boxCols = ['#b88a55', '#c9a46a', '#7f8791', '#3f6e9a'];
@@ -505,6 +523,76 @@ export class Showroom {
     // desplaza el encuadre para dejar sitio al panel lateral
     this.camera.setViewOffset(this._w, this._h, px, 0, this._w, this._h);
     this.camera.updateProjectionMatrix();
+  }
+
+  // Refleja las mejoras de fábrica compradas en la nave (más maquinaria, oficinas,
+  // centro de pruebas, división de competición...). Estilo low-poly, poco coste.
+  setFactoryVisuals(factory) {
+    if (this.factoryExtras) {
+      this.scene.remove(this.factoryExtras);
+      this.factoryExtras.traverse((o) => { if (o.isMesh) o.geometry.dispose(); });
+      this.factoryExtras = null;
+    }
+    const lvl = (id) => (factory && factory.upgrades && factory.upgrades[id]) || 0;
+    const g = new THREE.Group();
+    const steel = mat('#9aa1ab', { roughness: 0.5, metalness: 0.3 });
+    const dark = mat('#2b2f35'), orange = mat('#ff6a1a', { roughness: 0.5 });
+    const white = mat('#e9e1d2', { roughness: 0.9 });
+    const glassW = new THREE.MeshStandardMaterial({ color: '#8cc3d9', emissive: '#3b7fa0', emissiveIntensity: 0.5, roughness: 0.2, flatShading: true });
+
+    if (lvl('u_rd')) {
+      // Oficina de I+D con ventanal
+      const o = new THREE.Group();
+      o.add(box(7, 3.6, 5, white, 0, 1.8, 0));
+      o.add(box(7.1, 1.4, 0.2, glassW, 0, 2.6, 2.55));
+      o.add(box(7.2, 0.25, 5.2, dark, 0, 3.75, 0));
+      o.add(box(0.15, 3.6, 0.15, steel, -3.2, 1.8, 2.6));
+      o.add(box(0.15, 3.6, 0.15, steel, 3.2, 1.8, 2.6));
+      o.position.set(-24, 0, 21); g.add(o);
+    }
+    if (lvl('u_qc')) {
+      // Cabina de control de calidad con toldo a rayas
+      const q = new THREE.Group();
+      q.add(box(3, 2.6, 3, white, 0, 1.3, 0));
+      q.add(box(3.6, 0.18, 0.5, orange, 0, 2.75, 1.4));
+      q.add(box(3.6, 0.18, 0.5, white, 0, 2.75, 0.6));
+      q.add(box(0.8, 0.9, 0.15, glassW, 0, 1.7, 1.53));
+      q.position.set(-14, 0, 23); g.add(q);
+    }
+    if (lvl('u_test')) {
+      // Banco de pruebas (rodillos) con marco
+      const t = new THREE.Group();
+      for (const s of [-1.4, 1.4]) t.add(box(0.35, 2.2, 0.35, steel, s, 1.1, 0));
+      t.add(box(3.6, 0.3, 1.2, dark, 0, 2.3, 0));
+      for (const x of [-0.9, 0.9]) { const r = cyl(0.5, 0.5, 0.5, 12, steel); r.rotation.z = Math.PI / 2; r.position.set(x, 0.5, 0); t.add(r); }
+      t.add(box(3.4, 0.06, 2.2, mat('#3a3e45'), 0, 0.05, 0));
+      t.position.set(-3, 0, 23); g.add(t);
+    }
+    if (lvl('u_race')) {
+      // Podio de la división de competición con un bólido de exhibición
+      const p = new THREE.Group();
+      p.add(cyl(2.6, 2.9, 0.5, 14, white));
+      p.add(cyl(2.2, 2.2, 0.08, 14, orange)); p.children[1].position.y = 0.54;
+      const c = buildCar({ typeId: 'bolido', engineId: 'e13', intakeId: 'i12', turboId: 't2', tractionId: 'AWD', aeroId: 'a75', perf: 118, color: '#d6402b', seed: 99 });
+      c.position.y = 0.58; c.rotation.y = -0.6; p.add(c);
+      p.position.set(11, 0, 21); g.add(p);
+    }
+    // Un módulo de línea extra por cada 3 ampliaciones (de cualquier chasis), máximo 4.
+    const lineUps = Object.entries((factory && factory.upgrades) || {}).filter(([k]) => k.startsWith('u_lines')).reduce((s, [, v]) => s + v, 0);
+    const lines = Math.min(4, Math.ceil(lineUps / 3));
+    for (let i = 0; i < lines; i++) {
+      // Módulos de línea extra: brazo robot y estación de trabajo
+      const m = new THREE.Group();
+      const base = cyl(0.9, 1.1, 0.5, 10, steel); base.position.y = 0.25; m.add(base);
+      m.add(box(0.4, 2.6, 0.4, orange, 0, 1.6, 0));
+      m.add(box(0.9, 0.3, 0.7, dark, 0, 3.0, 0));
+      m.add(box(2.6, 1.2, 1.2, white, 2.4, 0.6, 0));
+      m.add(box(2.7, 0.1, 1.3, dark, 2.4, 1.25, 0));
+      m.position.set(24, 0, 6 - i * 7); g.add(m);
+    }
+    g.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = true; } });
+    this.factoryExtras = g;
+    this.scene.add(g);
   }
 
   clearCar() {
