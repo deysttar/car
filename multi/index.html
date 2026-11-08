@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ruleta Motors · Multijugador</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%23ff6a1a' stroke-width='4'/%3E%3Cpath d='M16 16 L16 5' stroke='%23ff6a1a' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://api.fontshare.com" />
+  <link href="https://api.fontshare.com/v2/css?f[]=clash-display@600,700&f[]=satoshi@400,500,700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./multi.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <canvas id="scene" aria-label="Montaje 3D del motor"></canvas>
+  <div class="fade" id="fade" aria-hidden="true"></div>
+
+  <header class="hud-top">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+        <circle cx="20" cy="20" r="15" stroke="currentColor" stroke-width="3.5" />
+        <circle cx="20" cy="20" r="4" fill="currentColor" />
+        <path d="M20 5v6M20 29v6M5 20h6M29 20h6" stroke="currentColor" stroke-width="3" stroke-linecap="round" />
+        <path d="M20 20 L29 11" stroke="#ff6a1a" stroke-width="3.5" stroke-linecap="round" />
+      </svg>
+      <div class="brand-text">
+        <span class="brand-name">Ruleta Motors</span>
+        <span class="brand-sub">Multijugador · Construcción</span>
+      </div>
+    </div>
+    <ol class="steps" id="steps">
+      <li data-step="1"><span class="n">1</span><span class="l">Plano</span></li>
+      <li data-step="2"><span class="n">2</span><span class="l">Pistones</span></li>
+      <li data-step="3"><span class="n">3</span><span class="l">Cilindrada</span></li>
+      <li data-step="4"><span class="n">4</span><span class="l">Admisión</span></li>
+      <li data-step="5"><span class="n">5</span><span class="l">Rendimiento</span></li>
+      <li data-step="6"><span class="n">6</span><span class="l">Chasis</span></li>
+      <li data-step="7"><span class="n">7</span><span class="l">Montaje</span></li>
+      <li data-step="8"><span class="n">8</span><span class="l">Tracción</span></li>
+      <li data-step="9"><span class="n">9</span><span class="l">Ruedas</span></li>
+      <li data-step="10"><span class="n">10</span><span class="l">Aerodinámica</span></li>
+      <li data-step="11"><span class="n">11</span><span class="l">Pintura</span></li>
+      <li data-step="12"><span class="n">12</span><span class="l">Potencia</span></li>
+      <li data-step="13"><span class="n">13</span><span class="l">Calidad</span></li>
+      <li data-step="14"><span class="n">14</span><span class="l">Presentación</span></li>
+      <li data-step="15"><span class="n">15</span><span class="l">Informe</span></li>
+    </ol>
+    <div class="top-actions">
+      <button class="room-chip" id="roomChip" type="button" hidden aria-expanded="false" aria-controls="roomPanel">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.6a3.4 3.4 0 0 1 0 6.6M18.5 14.8c1.6.8 2.6 2.6 3 5.2"/></svg>
+        <span class="num" id="chipCount">0/0</span>
+      </button>
+      <button class="btn btn-ghost" id="skipBtn" hidden>Saltar
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5l7 7-7 7M13 5l7 7-7 7"/></svg>
+      </button>
+      <button class="icon-btn" id="muteBtn" aria-label="Silenciar sonido" title="Sonido">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path id="muteWave" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <aside class="ticket" id="ticket" aria-label="Hoja de montaje del motor" hidden>
+    <div class="t-head">
+      <span class="t-title">Hoja de montaje</span>
+      <span class="t-serial num" id="serial">—</span>
+    </div>
+    <dl class="t-rows">
+      <div class="t-row" data-row="family"><dt>Tipo</dt><dd><span class="v">—</span><span class="chip"></span></dd></div>
+      <div class="t-row" data-row="engine"><dt>Configuración</dt><dd><span class="v">—</span><span class="chip"></span></dd></div>
+      <div class="t-row" data-row="intake"><dt>Cilindrada</dt><dd><span class="v">—</span><span class="chip"></span></dd></div>
+      <div class="t-row" data-row="turbo"><dt>Admisión</dt><dd><span class="v">—</span><span class="chip"></span></dd></div>
+      <div class="t-row" data-row="perf"><dt>Rendimiento</dt><dd><span class="v">—</span><span class="chip"></span></dd></div>
+    </dl>
+    <div class="t-foot" id="ticketFoot" hidden>
+      <span class="t-hp-l">Potencia estimada</span>
+      <span class="t-hp num" id="hp">—</span>
+    </div>
+  </aside>
+
+  <section class="caption" id="caption" aria-live="polite">
+    <span class="cap-kicker" id="capKicker"></span>
+    <h2 class="cap-title" id="capTitle"></h2>
+    <p class="cap-sub" id="capSub"></p>
+    <div class="summary" id="summary" hidden></div>
+  </section>
+
+  <div class="reel" id="reel" hidden>
+    <span class="reel-label" id="reelLabel"></span>
+    <div class="reel-window"><div class="reel-strip" id="reelStrip"></div></div>
+  </div>
+
+  <div class="gauge" id="gauge" hidden>
+    <svg viewBox="0 0 220 130" aria-hidden="true">
+      <path class="g-track" d="M20 115 A90 90 0 0 1 200 115" />
+      <path class="g-fill" id="gaugeFill" d="M20 115 A90 90 0 0 1 200 115" />
+      <g id="gaugeTicks"></g>
+      <line class="g-needle" id="gaugeNeedle" x1="110" y1="115" x2="110" y2="38" />
+      <circle class="g-hub" cx="110" cy="115" r="7" />
+    </svg>
+    <div class="g-read"><span class="g-num num" id="gaugeNum">0</span><span class="g-max">/100</span></div>
+    <span class="g-label" id="gaugeLabel">Rendimiento</span>
+  </div>
+
+
+  <div class="tunnel-hud" id="tunnelHud" hidden aria-live="polite">
+    <span class="th-title">Túnel de viento</span>
+    <div class="th-row"><span>Viento</span><b class="num" id="thWind">0 km/h</b></div>
+    <div class="th-row"><span>Coef. de resistencia (Cx)</span><b class="num" id="thCx">—</b></div>
+    <div class="th-row"><span>Carga aerodinámica</span><b class="num" id="thDown">—</b></div>
+    <div class="th-bar"><i id="thBar"></i></div>
+  </div>
+
+  <div class="dyno-hud" id="dynoHud" hidden>
+    <span class="th-title">Banco de potencia</span>
+    <svg viewBox="0 0 280 150" aria-hidden="true">
+      <g id="dynoGrid"></g>
+      <path id="dynoTq" class="d-tq" d="" />
+      <path id="dynoHp" class="d-hp" d="" />
+      <circle id="dynoPeak" class="d-peak" r="4" cx="-10" cy="-10" />
+    </svg>
+    <div class="d-read">
+      <div><span>Vueltas</span><b class="num" id="dynoRpm">0</b></div>
+      <div><span>Potencia</span><b class="num" id="dynoCv">0 CV</b></div>
+      <div><span>Par</span><b class="num" id="dynoNm">0 Nm</b></div>
+    </div>
+  </div>
+
+  <div class="qc-hud" id="qcHud" hidden>
+    <span class="th-title">Control de calidad</span>
+    <ul id="qcList"></ul>
+  </div>
+
+  <div class="printer" id="printer" hidden>
+    <div class="paper-wrap" id="paperWrap"><div class="paper" id="paper"></div></div>
+    <div class="printer-body"><span class="pr-slot"></span><span class="pr-led" id="prLed"></span><span class="pr-brand">Ruleta Motors · LP-15</span></div>
+  </div>
+
+  <div class="final" id="final" hidden>
+    <button class="btn btn-primary btn-lg" id="raceBtn" hidden>¡A la carrera!</button>
+    <button class="btn btn-primary btn-lg" id="againBtn">Construir otro motor</button>
+    <button class="btn btn-ghost btn-lg" id="nextBtn">Siguiente: chasis
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+    </button>
+  </div>
+
+  <div class="overlay" id="intro">
+    <div class="intro-card">
+      <span class="intro-kicker">Modo multijugador</span>
+      <h1 class="intro-title">Construye tu coche y gana la carrera</h1>
+      <p class="intro-lead">Cada jugador monta su coche pieza a pieza: motor, chasis, tracción, ruedas, aerodinámica y pintura. Cuando todos terminan, se miden en el circuito.</p>
+      <label class="field"><span>Tu nombre</span><input id="nameInput" maxlength="16" autocomplete="nickname" placeholder="Piloto" /></label>
+      <div class="intro-actions">
+        <button class="btn btn-primary btn-lg" id="hostBtn">Crear partida</button>
+        <form class="join" id="joinForm">
+          <input id="codeInput" maxlength="4" placeholder="CÓDIGO" autocomplete="off" aria-label="Código de la sala" />
+          <button class="btn btn-ghost btn-lg" type="submit">Unirse</button>
+        </form>
+      </div>
+      <button class="btn btn-ghost" id="startBtn">Jugar solo (contra bots)</button>
+      <p class="intro-note" id="introMsg">Quien crea la partida hace de anfitrión desde su navegador; los demás entran con el código o el enlace, en la misma red o desde cualquier sitio.</p>
+    </div>
+  </div>
+
+  <div class="overlay" id="lobby" hidden>
+    <div class="lobby-card">
+      <span class="intro-kicker">Sala de la partida</span>
+      <div class="room-code num" id="roomCode">····</div>
+      <div class="room-link"><input id="roomLink" readonly aria-label="Enlace para unirse" /><button class="btn" id="copyLink" type="button">Copiar enlace</button></div>
+      <ul class="players" id="playersList"></ul>
+      <div class="lobby-actions" id="hostActions">
+        <button class="btn" id="addBotBtn" type="button">Añadir bot</button>
+        <button class="btn btn-primary btn-lg" id="roundBtn" type="button">Empezar a construir</button>
+      </div>
+      <p class="intro-note" id="lobbyMsg"></p>
+      <button class="btn btn-ghost" id="leaveBtn" type="button">Salir de la sala</button>
+    </div>
+  </div>
+
+  <aside class="room-panel" id="roomPanel" hidden>
+    <div class="rp-head"><span>Sala</span><b class="num" id="rpCode"></b><span class="num" id="rpCount"></span></div>
+    <ul id="rpList"></ul>
+    <p id="rpMsg"></p>
+  </aside>
+
+  <div class="race-hud" id="raceHud" hidden>
+    <div class="rh-lap"><span>Vuelta</span><b class="num" id="rhLap">1/3</b></div>
+    <ol class="rh-list" id="rhList"></ol>
+    <div class="rh-speed"><b class="num" id="rhSpeed">0</b><span>km/h</span></div>
+    <button class="btn btn-ghost" id="camBtn" type="button">Cámara: mi coche</button>
+  </div>
+  <div class="race-toast" id="raceToast" hidden></div>
+
+  <div class="overlay" id="results" hidden>
+    <div class="lobby-card results-card">
+      <span class="intro-kicker">Resultado</span>
+      <h2 class="results-title" id="resTitle">¡Carrera terminada!</h2>
+      <table class="res-table"><thead><tr><th>#</th><th>Piloto</th><th>Coche</th><th>Tiempo</th><th>V. rápida</th></tr></thead><tbody id="resBody"></tbody></table>
+      <div class="lobby-actions">
+        <button class="btn btn-primary btn-lg" id="newRoundBtn" type="button">Otra ronda</button>
+        <button class="btn btn-ghost btn-lg" id="toLobbyBtn" type="button">Volver a la sala</button>
+      </div>
+      <p class="intro-note" id="resMsg"></p>
+    </div>
+  </div>
+
+  <!-- Conexión entre navegadores (WebRTC) para las partidas -->
+  <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

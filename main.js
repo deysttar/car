@@ -1,4 +1,4 @@
-import { Showroom } from './car3d.js';
+import { Showroom, designName } from './car3d.js';
 import {
   rollBuild, rollStage, buildFromPicks, rerollCost, stats, parts, byId, ratingLabel, rarityOf, newState, simulateDay, estimateDaily,
   allActive, spinCost, modelName, FIXED_DAILY, PER_MODEL_DAILY, marketRating, capacity, fixedDaily, factoryLevel, checkCommunityRequests,
@@ -504,7 +504,7 @@ function renderResult(car) {
       <div class="result-head">
         <div>
           <div class="result-name">${esc(state.company.split(' ')[0])} ${esc(car.name)}</div>
-          <div class="ci-sub">${p.type.name} · ${p.engine.name} ${p.intake.name} · ${p.turbo.name}</div>
+          <div class="ci-sub">${p.type.name} · ${designName(car)} · ${p.engine.name} ${p.intake.name} · ${p.turbo.name}</div>
         </div>
         ${ratingBadge(s.rating)}
       </div>
@@ -741,7 +741,7 @@ function renderDetail(c) {
 
   el.innerHTML = `<div class="detail">
     <div class="result-head">
-      <div><div class="result-name">${esc(c.name)}</div><div class="ci-sub">${p.type.name} · montado el día ${c.createdDay}${(c.updates || 0) ? ` · ${c.updates} actualización${c.updates > 1 ? 'es' : ''}` : ''}</div></div>
+      <div><div class="result-name">${esc(c.name)}</div><div class="ci-sub">${p.type.name} · ${designName(c)} · montado el día ${c.createdDay}${(c.updates || 0) ? ` · ${c.updates} actualización${c.updates > 1 ? 'es' : ''}` : ''}</div></div>
       ${ratingBadge(s.rating)}
     </div>
     <div class="stat-grid">

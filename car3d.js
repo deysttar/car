@@ -66,9 +66,16 @@ function addWheels(group, cfg, rimColor) {
   }
 }
 
+const headMat = () => mat('#fff6d8', { emissive: '#ffe9a8', emissiveIntensity: 1.2 });
+const tailMat = () => mat('#ff3b2f', { emissive: '#ff2a1a', emissiveIntensity: 1.1 });
+function isLight(hex) {
+  const n = parseInt(String(hex).replace('#', ''), 16);
+  return 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255) > 150;
+}
+
 function lights(group, front, rear, y, halfW, h = 0.1) {
-  const head = mat('#fff6d8', { emissive: '#ffe9a8', emissiveIntensity: 1.2 });
-  const tail = mat('#ff3b2f', { emissive: '#ff2a1a', emissiveIntensity: 1.1 });
+  const head = headMat();
+  const tail = tailMat();
   for (const z of [halfW - 0.22, -(halfW - 0.22)]) {
     group.add(box(0.06, h, 0.32, head, front, y, z));
     group.add(box(0.06, h, 0.36, tail, rear, y, z));
@@ -84,6 +91,25 @@ function exhausts(group, x, y, count, spread) {
     const q = cyl(0.035, 0.035, 0.23, 8, inner); q.rotation.z = Math.PI / 2; q.position.set(x - 0.005, y, z); group.add(q);
   }
 }
+
+// Variantes de carrocería por chasis (0 = diseño original). Se deriva de la semilla
+// del coche, así que un modelo conserva su diseño en cada versión.
+export const DESIGNS = {
+  utilitario: ['Compacto', 'Microcoche', 'Retro'],
+  furgoneta: ['Furgón', 'Monovolumen', 'Reparto'],
+  turismo: ['Berlina', 'Familiar', 'Fastback'],
+  suv: ['Urbano', 'Todoterreno', 'SUV coupé'],
+  pickup: ['Cabina simple', 'Doble cabina', 'Off-road'],
+  coupe: ['Clásico', 'Muscle', 'Descapotable'],
+  deportivo: ['Superdeportivo', 'Cuña', 'Gran turismo'],
+  bolido: ['Hiperdeportivo', 'Prototipo', 'Monoplaza'],
+};
+export function carDesign(car) {
+  if (car.design != null) return car.design;
+  const n = (DESIGNS[car.typeId] || ['']).length;
+  return Math.floor(mulberry32(((car.seed || 1) ^ 0x5bd1e995) >>> 0)() * n);
+}
+export const designName = (car) => (DESIGNS[car.typeId] || [])[carDesign(car)] || '';
 
 export function buildCar(car) {
   const rnd = mulberry32(car.seed || 1);
@@ -101,173 +127,479 @@ export function buildCar(car) {
   const aero = pr.aero.level;
   const exCount = Math.max(1, Math.min(4, Math.ceil((pr.engine.cyl || 4) / 4)));
 
+  const design = carDesign(car);
+  // franja del capó: [centro x, altura, inclinación, largo, separación z]
+  let stripe = null;
+  const hood = (x1, y1, x2, y2, maxLen = 1.2, z = 0.16) => {
+    stripe = [(x1 + x2) / 2, (y1 + y2) / 2 + 0.012, Math.atan2(y1 - y2, x1 - x2), Math.min(maxLen, Math.hypot(x1 - x2, y1 - y2) * 0.85), z];
+  };
+  const mirrors = (x, y, W, m = body) => { for (const z of [W / 2 + 0.06, -(W / 2 + 0.06)]) g.add(box(0.12, 0.09, 0.12, m, x, y, z)); };
+  const pillar = (x, y, h, W, m = body) => g.add(box(0.12, h, W - 0.17, m, x, y, 0));
+  const wing = (x, baseY, h, w, W) => {
+    for (const z of [0.55, -0.55]) g.add(box(0.08, h, 0.06, dark, x, baseY + h / 2, z));
+    g.add(box(w, 0.05, W - 0.1, aero >= 0.75 ? dark : body, x - 0.02, baseY + h, 0));
+  };
+
   if (pr.type.id === 'turismo') {
     const W = 1.78;
-    g.add(extrude([[-2.2, 0.3], [2.12, 0.3], [2.25, 0.5], [2.2, 0.72], [0.95, 0.86], [-1.65, 0.9], [-2.18, 0.86], [-2.26, 0.55]], W, body));
-    g.add(extrude([[-1.55, 0.86], [0.92, 0.86], [0.2, 1.36], [-1.05, 1.36], [-1.62, 0.95]], W - 0.2, glass));
-    g.add(extrude([[-1.08, 1.34], [0.22, 1.34], [0.16, 1.42], [-1.02, 1.42]], W - 0.16, body));
-    g.add(box(0.12, 0.5, W - 0.17, body, -0.35, 1.1, 0)); // pilar B
+    if (design === 1) {
+      // Familiar: techo prolongado hasta la zaga y barras de techo
+      g.add(extrude([[-2.3, 0.3], [2.12, 0.3], [2.25, 0.5], [2.2, 0.72], [0.95, 0.86], [-2.28, 0.9], [-2.34, 0.55]], W, body));
+      g.add(extrude([[-2.22, 0.88], [0.92, 0.86], [0.2, 1.36], [-2.1, 1.38], [-2.26, 1.0]], W - 0.2, glass));
+      g.add(extrude([[-2.14, 1.36], [0.22, 1.34], [0.16, 1.42], [-2.12, 1.44]], W - 0.16, body));
+      pillar(-0.35, 1.1, 0.5, W); pillar(-1.35, 1.12, 0.5, W);
+      for (const z of [0.6, -0.6]) g.add(box(2.0, 0.05, 0.05, dark, -1.0, 1.48, z));
+      lights(g, 2.21, -2.32, 0.66, W / 2);
+      g.add(box(0.3, 0.12, W + 0.04, trim, -2.24, 0.33, 0));
+    } else if (design === 2) {
+      // Fastback: luneta muy inclinada y cola corta con alerón integrado
+      g.add(extrude([[-2.2, 0.3], [2.12, 0.3], [2.25, 0.5], [2.2, 0.72], [0.95, 0.86], [-1.9, 0.9], [-2.2, 0.86], [-2.28, 0.55]], W, body));
+      g.add(extrude([[-1.95, 0.88], [0.92, 0.86], [0.25, 1.34], [-0.6, 1.36], [-1.95, 0.94]], W - 0.2, glass));
+      g.add(extrude([[-0.62, 1.34], [0.27, 1.34], [0.21, 1.42], [-0.6, 1.42]], W - 0.16, body));
+      pillar(-0.3, 1.1, 0.5, W);
+      g.add(box(0.22, 0.05, W - 0.1, aero >= 0.75 ? dark : body, -2.05, 0.92, 0));
+      lights(g, 2.21, -2.24, 0.66, W / 2);
+      g.add(box(0.3, 0.12, W + 0.04, trim, -2.1, 0.33, 0));
+    } else {
+      g.add(extrude([[-2.2, 0.3], [2.12, 0.3], [2.25, 0.5], [2.2, 0.72], [0.95, 0.86], [-1.65, 0.9], [-2.18, 0.86], [-2.26, 0.55]], W, body));
+      g.add(extrude([[-1.55, 0.86], [0.92, 0.86], [0.2, 1.36], [-1.05, 1.36], [-1.62, 0.95]], W - 0.2, glass));
+      g.add(extrude([[-1.08, 1.34], [0.22, 1.34], [0.16, 1.42], [-1.02, 1.42]], W - 0.16, body));
+      pillar(-0.35, 1.1, 0.5, W);
+      lights(g, 2.21, -2.24, 0.66, W / 2);
+      g.add(box(0.3, 0.12, W + 0.04, trim, -2.1, 0.33, 0));
+      if (aero >= 0.5) wing(-1.95, 0.88, aero >= 0.75 ? 0.28 : 0.1, 0.36, W);
+    }
     g.add(box(0.05, 0.16, 1.0, dark, 2.24, 0.48, 0)); // parrilla
     g.add(box(0.3, 0.12, W + 0.04, trim, 2.05, 0.33, 0)); // paragolpes
-    g.add(box(0.3, 0.12, W + 0.04, trim, -2.1, 0.33, 0));
-    lights(g, 2.21, -2.24, 0.66, W / 2);
-    // espejos
-    for (const z of [W / 2 + 0.06, -(W / 2 + 0.06)]) g.add(box(0.12, 0.09, 0.12, body, 0.75, 1.0, z));
-    if (aero >= 0.5) {
-      const h = aero >= 0.75 ? 0.28 : 0.1;
-      for (const z of [0.55, -0.55]) g.add(box(0.08, h, 0.06, dark, -1.95, 0.88 + h / 2, z));
-      g.add(box(0.36, 0.05, W - 0.1, aero >= 0.75 ? dark : body, -1.98, 0.9 + h, 0));
-    }
+    mirrors(0.75, 1.0, W);
+    hood(2.2, 0.72, 0.95, 0.86);
     if (supercharger) g.add(box(0.5, 0.12, 0.42, dark, 1.45, 0.84, 0));
     if (turboCount >= 2) for (const z of [W / 2 + 0.005, -(W / 2 + 0.005)]) g.add(box(0.4, 0.08, 0.02, dark, 1.4, 0.55, z));
-    exhausts(g, -2.27, 0.36, Math.min(exCount, 2), 0.55);
-    addWheels(g, { wb: [1.38, -1.38], track: 0.82, rf: 0.36, rr: 0.36, wf: 0.26, wr: 0.26 }, rimColor);
+    exhausts(g, design === 1 ? -2.35 : -2.27, 0.36, Math.min(exCount, 2), 0.55);
+    addWheels(g, { wb: [1.38, design === 1 ? -1.42 : -1.38], track: 0.82, rf: 0.36, rr: 0.36, wf: 0.26, wr: 0.26 }, rimColor);
   } else if (pr.type.id === 'pickup') {
     const W = 1.95;
-    g.add(extrude([[-2.55, 0.5], [2.45, 0.5], [2.58, 0.75], [2.52, 1.12], [1.0, 1.22], [-0.35, 1.22], [-0.35, 1.02], [-2.55, 1.02]], W, body));
-    g.add(extrude([[-0.35, 1.2], [0.98, 1.2], [0.55, 1.82], [-0.3, 1.82]], W - 0.18, glass));
-    g.add(extrude([[-0.33, 1.8], [0.58, 1.8], [0.54, 1.9], [-0.33, 1.9]], W - 0.12, body));
-    g.add(box(0.12, 0.62, W - 0.15, body, -0.3, 1.5, 0));
+    // el diseño 2 es un todoterreno elevado: carrocería subida y ruedas enormes
+    const lift = design === 2 ? 0.3 : 0;
+    const pg = new THREE.Group(); pg.position.y = lift; g.add(pg);
+    const cab = design === 1 ? -1.2 : -0.35; // trasera de la cabina
+    const rear = design === 1 ? -2.7 : -2.55;
+    pg.add(extrude([[rear, 0.5], [2.45, 0.5], [2.58, 0.75], [2.52, 1.12], [1.0, 1.22], [cab, 1.22], [cab, 1.02], [rear, 1.02]], W, body));
+    pg.add(extrude([[cab, 1.2], [0.98, 1.2], [0.55, 1.82], [cab + 0.05, 1.82]], W - 0.18, glass));
+    pg.add(extrude([[cab + 0.02, 1.8], [0.58, 1.8], [0.54, 1.9], [cab + 0.02, 1.9]], W - 0.12, body));
+    pg.add(box(0.12, 0.62, W - 0.15, body, cab + 0.05, 1.5, 0));
+    if (design === 1) pg.add(box(0.12, 0.62, W - 0.15, body, -0.3, 1.5, 0)); // pilar B de la doble cabina
     // caja de carga
-    g.add(box(2.15, 0.36, 0.1, body, -1.45, 1.2, W / 2 - 0.05));
-    g.add(box(2.15, 0.36, 0.1, body, -1.45, 1.2, -(W / 2 - 0.05)));
-    g.add(box(0.1, 0.36, W, body, -2.5, 1.2, 0));
-    g.add(box(2.05, 0.04, W - 0.2, dark, -1.45, 1.04, 0));
+    const bedL = cab - 0.1 - rear, bedX = (cab - 0.1 + rear) / 2;
+    pg.add(box(bedL, 0.36, 0.1, body, bedX, 1.2, W / 2 - 0.05));
+    pg.add(box(bedL, 0.36, 0.1, body, bedX, 1.2, -(W / 2 - 0.05)));
+    pg.add(box(0.1, 0.36, W, body, rear + 0.05, 1.2, 0));
+    pg.add(box(bedL - 0.1, 0.04, W - 0.2, dark, bedX, 1.04, 0));
     // carga aleatoria
     if (rnd() < 0.6) {
       const crate = mat('#b07a3c');
-      g.add(box(0.6, 0.4, 0.6, crate, -1.7, 1.26, 0.35));
-      if (rnd() < 0.5) g.add(box(0.5, 0.32, 0.5, crate, -1.0, 1.22, -0.4));
+      pg.add(box(0.6, 0.4, 0.6, crate, bedX - 0.25, 1.26, 0.35));
+      if (rnd() < 0.5 && bedL > 1.8) pg.add(box(0.5, 0.32, 0.5, crate, bedX + 0.45, 1.22, -0.4));
     }
-    g.add(box(0.08, 0.32, 1.3, dark, 2.57, 0.92, 0)); // parrilla
-    g.add(box(0.32, 0.18, W + 0.1, trim, 2.48, 0.6, 0));
-    g.add(box(0.2, 0.18, W + 0.1, trim, -2.58, 0.6, 0));
-    lights(g, 2.55, -2.57, 1.0, W / 2, 0.14);
-    // estribos
+    pg.add(box(0.08, 0.32, 1.3, dark, 2.57, 0.92, 0)); // parrilla
+    pg.add(box(0.32, 0.18, W + 0.1, trim, 2.48, 0.6, 0));
+    pg.add(box(0.2, 0.18, W + 0.1, trim, rear - 0.03, 0.6, 0));
+    lights(pg, 2.55, rear - 0.02, 1.0, W / 2, 0.14);
+    // estribos y espejos
     for (const z of [W / 2 + 0.08, -(W / 2 + 0.08)]) {
-      g.add(box(1.4, 0.06, 0.18, trim, 0.3, 0.48, z));
-      g.add(box(0.14, 0.12, 0.14, body, 0.85, 1.4, z * 1.02));
+      pg.add(box(design === 1 ? 2.2 : 1.4, 0.06, 0.18, trim, design === 1 ? -0.1 : 0.3, 0.48, z));
+      pg.add(box(0.14, 0.12, 0.14, body, 0.85, 1.4, z * 1.02));
     }
-    if (aero >= 0.5 || st.overallTier >= 3) {
+    if (design === 2) {
+      // defensa delantera, pasos de rueda y amortiguadores a la vista
+      const bar = mat('#2a2d31');
+      pg.add(box(0.1, 0.5, 1.5, bar, 2.72, 0.8, 0));
+      for (const z of [0.55, -0.55]) pg.add(box(0.3, 0.08, 0.08, bar, 2.62, 1.0, z));
+      for (const x of [1.6, -1.55]) for (const s of [1, -1]) {
+        pg.add(box(1.4, 0.1, 0.24, dark, x, 0.98, s * (W / 2 + 0.06)));
+        g.add(box(0.12, 0.45, 0.12, mat('#d6402b'), x + 0.15, 0.75, s * 0.62));
+      }
+    }
+    if (aero >= 0.5 || st.overallTier >= 3 || design === 2) {
       // barra antivuelco con focos
       const bar = mat('#2a2d31');
-      for (const z of [0.8, -0.8]) g.add(box(0.08, 0.5, 0.08, bar, -0.55, 1.45, z));
-      g.add(box(0.08, 0.08, 1.68, bar, -0.55, 1.7, 0));
+      const bx = cab - 0.2;
+      for (const z of [0.8, -0.8]) pg.add(box(0.08, 0.5, 0.08, bar, bx, 1.45, z));
+      pg.add(box(0.08, 0.08, 1.68, bar, bx, 1.7, 0));
       const lamp = mat('#fff6d8', { emissive: '#ffe9a8', emissiveIntensity: 0.9 });
-      for (let i = 0; i < 4; i++) g.add(box(0.1, 0.1, 0.18, lamp, -0.33, 1.95, -0.45 + i * 0.3));
+      for (let i = 0; i < 4; i++) pg.add(box(0.1, 0.1, 0.18, lamp, cab + 0.02, 1.95, -0.45 + i * 0.3));
     }
-    if (supercharger) g.add(box(0.55, 0.16, 0.45, dark, 1.8, 1.18, 0));
-    exhausts(g, -2.6, 0.55, Math.min(exCount, 2), 0.7);
-    addWheels(g, { wb: [1.6, -1.55], track: 0.9, rf: 0.48, rr: 0.48, wf: 0.36, wr: 0.36 }, rimColor);
+    if (supercharger) pg.add(box(0.55, 0.16, 0.45, dark, 1.8, 1.18, 0));
+    exhausts(pg, rear - 0.05, 0.55, Math.min(exCount, 2), 0.7);
+    const r = design === 2 ? 0.62 : 0.48, w = design === 2 ? 0.44 : 0.36;
+    addWheels(g, { wb: [1.6, design === 1 ? -1.75 : -1.55], track: design === 2 ? 1.02 : 0.9, rf: r, rr: r, wf: w, wr: w }, rimColor);
   } else if (pr.type.id === 'utilitario') {
-    const W = 1.6;
-    g.add(extrude([[-1.8, 0.3], [1.7, 0.3], [1.82, 0.5], [1.78, 0.7], [0.8, 0.82], [-1.7, 0.86], [-1.82, 0.6]], W, body));
-    g.add(extrude([[-1.7, 0.84], [0.75, 0.84], [0.1, 1.38], [-1.2, 1.38], [-1.72, 1.0]], W - 0.2, glass));
-    g.add(extrude([[-1.22, 1.36], [0.12, 1.36], [0.08, 1.44], [-1.2, 1.44]], W - 0.16, body));
-    g.add(box(0.1, 0.5, W - 0.17, body, -0.45, 1.1, 0));
-    g.add(box(0.05, 0.14, 0.8, dark, 1.8, 0.5, 0));
-    g.add(box(0.26, 0.12, W + 0.04, trim, 1.65, 0.33, 0));
-    g.add(box(0.26, 0.12, W + 0.04, trim, -1.7, 0.33, 0));
-    lights(g, 1.79, -1.82, 0.66, W / 2);
-    for (const z of [W / 2 + 0.06, -(W / 2 + 0.06)]) g.add(box(0.12, 0.09, 0.12, body, 0.55, 1.0, z));
-    if (aero >= 0.5) g.add(box(0.3, 0.05, W - 0.2, dark, -1.75, 1.0, 0));
-    if (supercharger) g.add(box(0.4, 0.1, 0.36, dark, 1.2, 0.8, 0));
-    exhausts(g, -1.84, 0.36, 1, 0.5);
-    addWheels(g, { wb: [1.05, -1.05], track: 0.74, rf: 0.3, rr: 0.3, wf: 0.22, wr: 0.22 }, rimColor);
+    if (design === 1) {
+      // Microcoche cúbico (kei car): morro corto y techo alto
+      const W = 1.55;
+      g.add(extrude([[-1.7, 0.3], [1.6, 0.3], [1.7, 0.45], [1.68, 0.78], [1.2, 0.86], [-1.7, 0.88]], W, body));
+      g.add(extrude([[-1.66, 0.86], [1.15, 0.86], [0.85, 1.62], [-1.64, 1.62]], W - 0.18, glass));
+      g.add(extrude([[-1.7, 1.6], [0.88, 1.6], [0.84, 1.7], [-1.7, 1.7]], W - 0.12, body));
+      pillar(-0.3, 1.24, 0.76, W); pillar(-1.62, 1.24, 0.76, W);
+      g.add(box(0.05, 0.12, 0.7, dark, 1.69, 0.55, 0));
+      g.add(box(0.24, 0.12, W + 0.04, trim, 1.6, 0.33, 0));
+      g.add(box(0.24, 0.12, W + 0.04, trim, -1.62, 0.33, 0));
+      lights(g, 1.68, -1.72, 0.68, W / 2, 0.14);
+      mirrors(0.95, 1.0, W);
+      for (const z of [0.5, -0.5]) g.add(box(1.8, 0.04, 0.05, dark, -0.4, 1.73, z));
+      hood(1.68, 0.78, 1.2, 0.86, 0.5);
+      if (supercharger) g.add(box(0.3, 0.08, 0.3, dark, 1.45, 0.84, 0));
+      exhausts(g, -1.72, 0.36, 1, 0.5);
+      addWheels(g, { wb: [1.1, -1.1], track: 0.72, rf: 0.29, rr: 0.29, wf: 0.22, wr: 0.22 }, rimColor);
+    } else if (design === 2) {
+      // Retro: formas redondeadas, faros circulares, cromados y techo bicolor
+      const W = 1.62;
+      const roofM = mat(isLight(car.color) ? '#24272c' : '#f2efe6', { roughness: 0.45 });
+      const chrome = mat('#cfd6dc', { metalness: 0.7, roughness: 0.25 });
+      g.add(extrude([[-1.6, 0.3], [1.55, 0.3], [1.68, 0.42], [1.7, 0.62], [1.5, 0.78], [0.75, 0.86], [-1.45, 0.88], [-1.66, 0.78], [-1.7, 0.5]], W, body));
+      g.add(extrude([[-1.5, 0.86], [0.7, 0.86], [0.25, 1.3], [-1.15, 1.32], [-1.55, 1.0]], W - 0.2, glass));
+      g.add(extrude([[-1.18, 1.3], [0.28, 1.3], [0.22, 1.4], [-1.12, 1.42]], W - 0.14, roofM));
+      pillar(-0.45, 1.08, 0.46, W, roofM);
+      for (const z of [0.55, -0.55]) {
+        const hl = cyl(0.12, 0.12, 0.08, 12, headMat()); hl.rotation.z = Math.PI / 2; hl.position.set(1.66, 0.64, z); g.add(hl);
+        const ring = cyl(0.14, 0.14, 0.06, 12, chrome); ring.rotation.z = Math.PI / 2; ring.position.set(1.64, 0.64, z); g.add(ring);
+        g.add(box(0.06, 0.14, 0.14, tailMat(), -1.68, 0.66, z));
+      }
+      g.add(box(0.12, 0.08, W + 0.06, chrome, 1.66, 0.36, 0));
+      g.add(box(0.12, 0.08, W + 0.06, chrome, -1.69, 0.36, 0));
+      g.add(box(0.04, 0.06, 0.5, chrome, 1.7, 0.5, 0));
+      mirrors(0.6, 0.98, W, chrome);
+      hood(1.5, 0.78, 0.75, 0.86, 0.6);
+      if (aero >= 0.5) g.add(box(0.26, 0.05, W - 0.3, roofM, -1.12, 1.44, 0));
+      if (supercharger) g.add(box(0.36, 0.08, 0.3, dark, 1.15, 0.86, 0));
+      exhausts(g, -1.72, 0.36, 1, 0.5);
+      addWheels(g, { wb: [1.05, -1.0], track: 0.75, rf: 0.29, rr: 0.29, wf: 0.22, wr: 0.22 }, rimColor);
+    } else {
+      const W = 1.6;
+      g.add(extrude([[-1.8, 0.3], [1.7, 0.3], [1.82, 0.5], [1.78, 0.7], [0.8, 0.82], [-1.7, 0.86], [-1.82, 0.6]], W, body));
+      g.add(extrude([[-1.7, 0.84], [0.75, 0.84], [0.1, 1.38], [-1.2, 1.38], [-1.72, 1.0]], W - 0.2, glass));
+      g.add(extrude([[-1.22, 1.36], [0.12, 1.36], [0.08, 1.44], [-1.2, 1.44]], W - 0.16, body));
+      g.add(box(0.1, 0.5, W - 0.17, body, -0.45, 1.1, 0));
+      g.add(box(0.05, 0.14, 0.8, dark, 1.8, 0.5, 0));
+      g.add(box(0.26, 0.12, W + 0.04, trim, 1.65, 0.33, 0));
+      g.add(box(0.26, 0.12, W + 0.04, trim, -1.7, 0.33, 0));
+      lights(g, 1.79, -1.82, 0.66, W / 2);
+      mirrors(0.55, 1.0, W);
+      if (aero >= 0.5) g.add(box(0.3, 0.05, W - 0.2, dark, -1.75, 1.0, 0));
+      if (supercharger) g.add(box(0.4, 0.1, 0.36, dark, 1.2, 0.8, 0));
+      stripe = [1.25, 0.775, -0.122, 1.2, 0.16];
+      exhausts(g, -1.84, 0.36, 1, 0.5);
+      addWheels(g, { wb: [1.05, -1.05], track: 0.74, rf: 0.3, rr: 0.3, wf: 0.22, wr: 0.22 }, rimColor);
+    }
   } else if (pr.type.id === 'furgoneta') {
-    const W = 1.9;
-    g.add(extrude([[-2.4, 0.4], [2.25, 0.4], [2.35, 0.7], [2.3, 1.05], [1.35, 1.2], [-2.4, 1.2]], W, body));
-    g.add(box(3.1, 1.1, W, body, -0.85, 1.75, 0));
-    g.add(extrude([[0.7, 1.2], [1.38, 1.2], [0.95, 1.85], [0.7, 1.85]], W - 0.2, glass));
-    g.add(box(0.03, 0.9, W - 0.1, dark, -2.4, 1.75, 0));
-    g.add(box(0.06, 0.3, 1.2, dark, 2.34, 0.82, 0));
-    g.add(box(0.3, 0.16, W + 0.06, trim, 2.25, 0.55, 0));
-    g.add(box(0.2, 0.16, W + 0.06, trim, -2.42, 0.55, 0));
-    lights(g, 2.33, -2.42, 0.95, W / 2, 0.12);
-    for (const z of [W / 2 + 0.07, -(W / 2 + 0.07)]) g.add(box(0.12, 0.1, 0.12, body, 1.2, 1.5, z));
-    if (supercharger) g.add(box(0.5, 0.14, 0.4, dark, 1.8, 1.1, 0));
-    exhausts(g, -2.43, 0.5, 1, 0.7);
-    addWheels(g, { wb: [1.5, -1.5], track: 0.85, rf: 0.4, rr: 0.4, wf: 0.28, wr: 0.28 }, rimColor);
+    if (design === 1) {
+      // Monovolumen: un solo volumen con ventanas corridas
+      const W = 1.9;
+      g.add(extrude([[-2.4, 0.4], [2.3, 0.4], [2.42, 0.65], [2.38, 0.95], [1.6, 1.15], [-2.4, 1.15]], W, body));
+      g.add(extrude([[-2.36, 1.13], [1.6, 1.13], [0.9, 1.72], [-2.34, 1.72]], W - 0.16, glass));
+      g.add(extrude([[-2.42, 1.7], [0.92, 1.7], [0.62, 1.95], [-2.4, 1.95]], W - 0.04, body));
+      for (const x of [0.62, -0.5, -1.5, -2.3]) pillar(x, 1.42, 0.6, W + 0.02);
+      for (const s of [1, -1]) {
+        g.add(box(4.6, 0.08, 0.02, trim, 0, 0.95, s * (W / 2 + 0.005)));
+        g.add(box(1.5, 0.04, 0.03, dark, -0.5, 1.72, s * (W / 2 + 0.01))); // guía de puerta corredera
+      }
+      if (rnd() < 0.5) for (const z of [0.6, -0.6]) g.add(box(2.6, 0.06, 0.06, dark, -0.9, 2.0, z));
+      g.add(box(0.06, 0.22, 1.1, dark, 2.41, 0.78, 0));
+      g.add(box(0.3, 0.16, W + 0.06, trim, 2.3, 0.52, 0));
+      g.add(box(0.2, 0.16, W + 0.06, trim, -2.42, 0.52, 0));
+      lights(g, 2.39, -2.42, 0.88, W / 2, 0.12);
+      mirrors(1.4, 1.25, W);
+      if (supercharger) g.add(box(0.5, 0.12, 0.4, dark, 2.0, 1.02, 0));
+      exhausts(g, -2.43, 0.5, 1, 0.7);
+      addWheels(g, { wb: [1.55, -1.5], track: 0.85, rf: 0.4, rr: 0.4, wf: 0.28, wr: 0.28 }, rimColor);
+    } else if (design === 2) {
+      // Camión de reparto: cabina con deflector y caja de carga separada
+      const W = 2.0;
+      const cargo = mat('#ecebe6', { roughness: 0.7 });
+      g.add(box(4.6, 0.18, 1.0, dark, -0.05, 0.55, 0)); // bastidor
+      g.add(extrude([[0.4, 0.45], [2.3, 0.45], [2.42, 0.75], [2.38, 1.15], [1.9, 1.3], [0.4, 1.3]], W, body));
+      g.add(extrude([[0.5, 1.28], [1.92, 1.28], [1.6, 1.95], [0.5, 1.95]], W - 0.2, glass));
+      g.add(extrude([[0.45, 1.93], [1.62, 1.93], [1.55, 2.05], [0.45, 2.05]], W - 0.1, body));
+      g.add(extrude([[0.45, 2.04], [1.45, 2.04], [0.45, 2.6]], W - 0.3, body)); // deflector
+      pillar(0.5, 1.62, 0.66, W);
+      g.add(box(2.85, 2.1, W + 0.1, cargo, -1.05, 1.62, 0));
+      g.add(box(2.87, 0.28, W + 0.12, body, -1.05, 1.15, 0));
+      g.add(box(0.02, 1.9, 0.04, dark, -2.485, 1.62, 0)); // puertas traseras
+      for (const s of [1, -1]) {
+        g.add(box(0.06, 0.24, 0.1, trim, 1.75, 1.55, s * (W / 2 + 0.08)));
+        g.add(box(0.04, 0.4, 0.06, trim, 1.75, 1.75, s * (W / 2 + 0.12)));
+      }
+      g.add(box(0.06, 0.3, 1.2, dark, 2.41, 0.85, 0));
+      g.add(box(0.3, 0.18, W + 0.06, trim, 2.3, 0.55, 0));
+      lights(g, 2.4, -2.49, 1.0, W / 2, 0.12);
+      if (supercharger) g.add(box(0.5, 0.12, 0.4, dark, 1.95, 1.2, 0));
+      exhausts(g, -2.5, 0.5, 1, 0.7);
+      addWheels(g, { wb: [1.7, -1.45], track: 0.88, rf: 0.42, rr: 0.42, wf: 0.3, wr: 0.38 }, rimColor);
+    } else {
+      const W = 1.9;
+      g.add(extrude([[-2.4, 0.4], [2.25, 0.4], [2.35, 0.7], [2.3, 1.05], [1.35, 1.2], [-2.4, 1.2]], W, body));
+      g.add(box(3.1, 1.1, W, body, -0.85, 1.75, 0));
+      g.add(extrude([[0.7, 1.2], [1.38, 1.2], [0.95, 1.85], [0.7, 1.85]], W - 0.2, glass));
+      g.add(box(0.03, 0.9, W - 0.1, dark, -2.4, 1.75, 0));
+      g.add(box(0.06, 0.3, 1.2, dark, 2.34, 0.82, 0));
+      g.add(box(0.3, 0.16, W + 0.06, trim, 2.25, 0.55, 0));
+      g.add(box(0.2, 0.16, W + 0.06, trim, -2.42, 0.55, 0));
+      lights(g, 2.33, -2.42, 0.95, W / 2, 0.12);
+      for (const z of [W / 2 + 0.07, -(W / 2 + 0.07)]) g.add(box(0.12, 0.1, 0.12, body, 1.2, 1.5, z));
+      if (supercharger) g.add(box(0.5, 0.14, 0.4, dark, 1.8, 1.1, 0));
+      exhausts(g, -2.43, 0.5, 1, 0.7);
+      addWheels(g, { wb: [1.5, -1.5], track: 0.85, rf: 0.4, rr: 0.4, wf: 0.28, wr: 0.28 }, rimColor);
+    }
   } else if (pr.type.id === 'suv') {
-    const W = 1.9;
-    g.add(extrude([[-2.2, 0.42], [2.1, 0.42], [2.22, 0.62], [2.18, 0.98], [1.0, 1.1], [-2.2, 1.12]], W, body));
-    g.add(extrude([[-2.12, 1.08], [1.0, 1.08], [0.4, 1.72], [-1.95, 1.72]], W - 0.2, glass));
-    g.add(extrude([[-2.0, 1.7], [0.42, 1.7], [0.38, 1.8], [-1.98, 1.8]], W - 0.16, body));
-    g.add(box(0.12, 0.62, W - 0.17, body, -0.6, 1.4, 0));
-    for (const z of [0.6, -0.6]) g.add(box(2.2, 0.05, 0.05, dark, -0.8, 1.85, z));
-    g.add(box(3.8, 0.1, W + 0.04, trim, 0, 0.46, 0));
-    g.add(box(0.06, 0.26, 1.2, dark, 2.2, 0.8, 0));
-    g.add(box(0.3, 0.14, W + 0.06, trim, 2.1, 0.52, 0));
-    g.add(box(0.3, 0.14, W + 0.06, trim, -2.2, 0.52, 0));
-    lights(g, 2.2, -2.22, 0.88, W / 2, 0.12);
-    for (const z of [W / 2 + 0.06, -(W / 2 + 0.06)]) g.add(box(0.12, 0.1, 0.12, body, 0.85, 1.35, z));
-    if (supercharger) g.add(box(0.5, 0.14, 0.4, dark, 1.5, 1.12, 0));
-    exhausts(g, -2.22, 0.5, Math.min(exCount, 2), 0.6);
-    addWheels(g, { wb: [1.45, -1.4], track: 0.88, rf: 0.44, rr: 0.44, wf: 0.32, wr: 0.32 }, rimColor);
+    if (design === 1) {
+      // Todoterreno clásico: caja cuadrada, rueda de repuesto, snorkel y defensa
+      const W = 1.92;
+      g.add(extrude([[-2.1, 0.5], [2.0, 0.5], [2.08, 0.7], [2.06, 1.15], [1.0, 1.2], [-2.1, 1.2]], W, body));
+      g.add(extrude([[-2.05, 1.18], [1.0, 1.18], [0.85, 1.85], [-2.03, 1.85]], W - 0.18, glass));
+      g.add(extrude([[-2.1, 1.83], [0.88, 1.83], [0.86, 1.93], [-2.1, 1.93]], W - 0.1, body));
+      for (const x of [-0.35, -1.3, -2.02]) pillar(x, 1.52, 0.66, W);
+      for (const x of [1.4, -1.35]) for (const s of [1, -1]) g.add(box(1.1, 0.12, 0.16, dark, x, 1.0, s * (W / 2 + 0.05)));
+      const spare = wheel(0.4, 0.24, rimColor); spare.rotation.y = Math.PI / 2; spare.position.set(-2.24, 1.2, 0); g.add(spare);
+      g.add(box(0.1, 0.8, 0.1, dark, 1.05, 1.55, W / 2 + 0.07)); // snorkel
+      g.add(box(0.2, 0.1, 0.1, dark, 1.12, 1.98, W / 2 + 0.07));
+      const bar = mat('#2a2d31');
+      g.add(box(0.1, 0.4, 1.6, bar, 2.18, 0.8, 0));
+      for (const z of [0.5, -0.5]) g.add(box(0.2, 0.06, 0.06, bar, 2.1, 1.0, z));
+      g.add(box(2.4, 0.08, 1.5, bar, -0.6, 2.0, 0)); // baca
+      if (rnd() < 0.5) g.add(box(0.8, 0.3, 0.9, mat('#6d6a5c'), -1.0, 2.19, 0));
+      g.add(box(0.06, 0.26, 1.1, dark, 2.08, 0.95, 0));
+      g.add(box(0.2, 0.16, W + 0.04, trim, -2.12, 0.6, 0));
+      lights(g, 2.07, -2.12, 1.02, W / 2, 0.14);
+      mirrors(0.85, 1.4, W);
+      if (supercharger) g.add(box(0.5, 0.14, 0.4, dark, 1.5, 1.24, 0));
+      exhausts(g, -2.15, 0.55, Math.min(exCount, 2), 0.6);
+      addWheels(g, { wb: [1.4, -1.35], track: 0.9, rf: 0.46, rr: 0.46, wf: 0.34, wr: 0.34 }, rimColor);
+    } else if (design === 2) {
+      // SUV coupé: caída de techo deportiva
+      const W = 1.95;
+      g.add(extrude([[-2.2, 0.42], [2.1, 0.42], [2.22, 0.62], [2.18, 0.98], [1.0, 1.1], [-2.15, 1.06], [-2.25, 0.75]], W, body));
+      g.add(extrude([[-1.95, 1.06], [1.0, 1.08], [0.35, 1.66], [-0.6, 1.68], [-1.95, 1.2]], W - 0.2, glass));
+      g.add(extrude([[-0.62, 1.66], [0.38, 1.66], [0.33, 1.75], [-0.6, 1.75]], W - 0.16, body));
+      pillar(-0.35, 1.38, 0.6, W);
+      g.add(box(0.25, 0.05, W - 0.2, aero >= 0.75 ? dark : body, -1.98, 1.22, 0));
+      g.add(box(3.8, 0.1, W + 0.04, trim, 0, 0.46, 0));
+      g.add(box(0.06, 0.26, 1.2, dark, 2.2, 0.8, 0));
+      g.add(box(0.3, 0.14, W + 0.06, trim, 2.1, 0.52, 0));
+      g.add(box(0.3, 0.14, W + 0.06, trim, -2.2, 0.52, 0));
+      lights(g, 2.2, -2.24, 0.88, W / 2, 0.1);
+      mirrors(0.85, 1.32, W);
+      hood(2.18, 0.98, 1.0, 1.1, 1.0);
+      if (supercharger) g.add(box(0.5, 0.14, 0.4, dark, 1.5, 1.12, 0));
+      exhausts(g, -2.24, 0.5, Math.max(2, Math.min(exCount, 4)), 0.6);
+      addWheels(g, { wb: [1.45, -1.4], track: 0.9, rf: 0.44, rr: 0.44, wf: 0.32, wr: 0.34 }, rimColor);
+    } else {
+      const W = 1.9;
+      g.add(extrude([[-2.2, 0.42], [2.1, 0.42], [2.22, 0.62], [2.18, 0.98], [1.0, 1.1], [-2.2, 1.12]], W, body));
+      g.add(extrude([[-2.12, 1.08], [1.0, 1.08], [0.4, 1.72], [-1.95, 1.72]], W - 0.2, glass));
+      g.add(extrude([[-2.0, 1.7], [0.42, 1.7], [0.38, 1.8], [-1.98, 1.8]], W - 0.16, body));
+      g.add(box(0.12, 0.62, W - 0.17, body, -0.6, 1.4, 0));
+      for (const z of [0.6, -0.6]) g.add(box(2.2, 0.05, 0.05, dark, -0.8, 1.85, z));
+      g.add(box(3.8, 0.1, W + 0.04, trim, 0, 0.46, 0));
+      g.add(box(0.06, 0.26, 1.2, dark, 2.2, 0.8, 0));
+      g.add(box(0.3, 0.14, W + 0.06, trim, 2.1, 0.52, 0));
+      g.add(box(0.3, 0.14, W + 0.06, trim, -2.2, 0.52, 0));
+      lights(g, 2.2, -2.22, 0.88, W / 2, 0.12);
+      for (const z of [W / 2 + 0.06, -(W / 2 + 0.06)]) g.add(box(0.12, 0.1, 0.12, body, 0.85, 1.35, z));
+      if (supercharger) g.add(box(0.5, 0.14, 0.4, dark, 1.5, 1.12, 0));
+      exhausts(g, -2.22, 0.5, Math.min(exCount, 2), 0.6);
+      addWheels(g, { wb: [1.45, -1.4], track: 0.88, rf: 0.44, rr: 0.44, wf: 0.32, wr: 0.32 }, rimColor);
+    }
   } else if (pr.type.id === 'coupe') {
-    const W = 1.85;
-    g.add(extrude([[-2.25, 0.3], [2.2, 0.3], [2.34, 0.48], [2.26, 0.66], [1.0, 0.82], [-1.6, 0.86], [-2.24, 0.8], [-2.32, 0.52]], W, body));
-    g.add(extrude([[-1.45, 0.84], [0.7, 0.8], [0.05, 1.28], [-0.85, 1.3], [-1.55, 0.92]], W - 0.22, glass));
-    g.add(extrude([[-0.88, 1.27], [0.08, 1.27], [0.04, 1.35], [-0.86, 1.35]], W - 0.18, body));
-    g.add(box(0.05, 0.14, 1.0, dark, 2.33, 0.5, 0));
-    g.add(box(0.3, 0.1, W + 0.04, trim, 2.14, 0.33, 0));
-    g.add(box(0.3, 0.1, W + 0.04, trim, -2.2, 0.33, 0));
-    lights(g, 2.3, -2.32, 0.62, W / 2, 0.08);
-    for (const z of [W / 2 + 0.06, -(W / 2 + 0.06)]) g.add(box(0.12, 0.08, 0.12, body, 0.6, 0.98, z));
-    if (aero >= 0.5) g.add(box(0.3, 0.05, W - 0.15, aero >= 0.75 ? dark : body, -2.2, 0.92, 0));
-    if (supercharger) g.add(box(0.5, 0.1, 0.4, dark, 1.4, 0.8, 0));
-    exhausts(g, -2.33, 0.36, 2, 0.55);
-    addWheels(g, { wb: [1.45, -1.45], track: 0.85, rf: 0.37, rr: 0.38, wf: 0.28, wr: 0.3 }, rimColor);
+    if (design === 1) {
+      // Muscle car: capó larguísimo con toma de aire y zaga truncada
+      const W = 1.9;
+      g.add(extrude([[-2.3, 0.32], [2.3, 0.32], [2.4, 0.5], [2.36, 0.78], [0.55, 0.86], [-1.6, 0.9], [-2.28, 0.9], [-2.36, 0.55]], W, body));
+      g.add(extrude([[-1.55, 0.88], [0.5, 0.85], [-0.1, 1.3], [-0.9, 1.32], [-1.6, 0.95]], W - 0.22, glass));
+      g.add(extrude([[-0.92, 1.3], [-0.08, 1.3], [-0.12, 1.38], [-0.9, 1.38]], W - 0.18, body));
+      g.add(extrude([[1.0, 0.82], [1.7, 0.8], [1.6, 0.94], [1.1, 0.96]], 0.36, supercharger ? dark : body)); // toma del capó
+      g.add(box(0.04, 0.08, 0.3, dark, 1.61, 0.88, 0));
+      g.add(box(0.22, 0.06, W - 0.1, aero >= 0.75 ? dark : body, -2.2, 0.95, 0));
+      g.add(box(0.05, 0.2, 1.5, dark, 2.39, 0.62, 0));
+      g.add(box(0.06, 0.1, W - 0.4, tailMat(), -2.37, 0.72, 0)); // piloto corrido
+      g.add(box(0.3, 0.1, W + 0.04, trim, 2.24, 0.36, 0));
+      g.add(box(0.3, 0.1, W + 0.04, trim, -2.25, 0.36, 0));
+      lights(g, 2.39, -2.37, 0.62, W / 2, 0.1);
+      mirrors(0.4, 0.98, W);
+      hood(2.36, 0.78, 0.55, 0.86, 1.6, 0.42);
+      exhausts(g, -2.38, 0.38, 2, 0.6);
+      addWheels(g, { wb: [1.5, -1.45], track: 0.86, rf: 0.38, rr: 0.4, wf: 0.28, wr: 0.34 }, rimColor);
+    } else if (design === 2) {
+      // Descapotable: sin techo, asientos a la vista y jorobas tras los reposacabezas
+      const W = 1.82;
+      const leather = mat('#5a3424', { roughness: 0.8 });
+      g.add(extrude([[-2.2, 0.3], [2.15, 0.3], [2.3, 0.46], [2.24, 0.64], [0.75, 0.8], [-1.7, 0.84], [-2.2, 0.8], [-2.28, 0.5]], W, body));
+      g.add(extrude([[0.72, 0.8], [0.84, 0.8], [0.36, 1.18], [0.27, 1.18]], W - 0.3, glass));
+      g.add(box(0.08, 0.05, W - 0.28, dark, 0.31, 1.19, 0));
+      g.add(box(1.6, 0.03, W - 0.32, mat('#1a1b1e'), -0.4, 0.83, 0));
+      for (const z of [0.38, -0.38]) {
+        g.add(box(0.5, 0.12, 0.42, leather, -0.5, 0.9, z));
+        const back = box(0.12, 0.5, 0.42, leather, -0.78, 1.1, z); back.rotation.z = 0.2; g.add(back);
+        g.add(box(0.6, 0.16, 0.34, body, -1.25, 0.9, z)); // joroba
+      }
+      const sw = cyl(0.15, 0.15, 0.04, 10, dark); sw.rotation.z = Math.PI / 2 - 0.45; sw.position.set(0.15, 1.0, 0.38); g.add(sw);
+      g.add(box(0.05, 0.14, 1.0, dark, 2.29, 0.48, 0));
+      g.add(box(0.3, 0.1, W + 0.04, trim, 2.14, 0.33, 0));
+      g.add(box(0.3, 0.1, W + 0.04, trim, -2.18, 0.33, 0));
+      lights(g, 2.27, -2.28, 0.6, W / 2, 0.08);
+      mirrors(0.55, 0.92, W);
+      if (aero >= 0.5) g.add(box(0.26, 0.05, W - 0.2, aero >= 0.75 ? dark : body, -2.08, 0.86, 0));
+      hood(2.24, 0.64, 0.75, 0.8);
+      if (supercharger) g.add(box(0.5, 0.1, 0.4, dark, 1.4, 0.76, 0));
+      exhausts(g, -2.3, 0.36, 2, 0.55);
+      addWheels(g, { wb: [1.45, -1.4], track: 0.84, rf: 0.36, rr: 0.37, wf: 0.27, wr: 0.3 }, rimColor);
+    } else {
+      const W = 1.85;
+      g.add(extrude([[-2.25, 0.3], [2.2, 0.3], [2.34, 0.48], [2.26, 0.66], [1.0, 0.82], [-1.6, 0.86], [-2.24, 0.8], [-2.32, 0.52]], W, body));
+      g.add(extrude([[-1.45, 0.84], [0.7, 0.8], [0.05, 1.28], [-0.85, 1.3], [-1.55, 0.92]], W - 0.22, glass));
+      g.add(extrude([[-0.88, 1.27], [0.08, 1.27], [0.04, 1.35], [-0.86, 1.35]], W - 0.18, body));
+      g.add(box(0.05, 0.14, 1.0, dark, 2.33, 0.5, 0));
+      g.add(box(0.3, 0.1, W + 0.04, trim, 2.14, 0.33, 0));
+      g.add(box(0.3, 0.1, W + 0.04, trim, -2.2, 0.33, 0));
+      lights(g, 2.3, -2.32, 0.62, W / 2, 0.08);
+      for (const z of [W / 2 + 0.06, -(W / 2 + 0.06)]) g.add(box(0.12, 0.08, 0.12, body, 0.6, 0.98, z));
+      if (aero >= 0.5) g.add(box(0.3, 0.05, W - 0.15, aero >= 0.75 ? dark : body, -2.2, 0.92, 0));
+      if (supercharger) g.add(box(0.5, 0.1, 0.4, dark, 1.4, 0.8, 0));
+      stripe = [1.6, 0.755, -0.127, 1.2, 0.16];
+      exhausts(g, -2.33, 0.36, 2, 0.55);
+      addWheels(g, { wb: [1.45, -1.45], track: 0.85, rf: 0.37, rr: 0.38, wf: 0.28, wr: 0.3 }, rimColor);
+    }
   } else if (pr.type.id === 'deportivo') {
     const W = 1.95;
-    g.add(extrude([[-2.2, 0.26], [2.15, 0.26], [2.32, 0.36], [2.2, 0.5], [0.9, 0.68], [-1.5, 0.84], [-2.2, 0.84], [-2.28, 0.5]], W, body));
-    g.add(extrude([[-0.9, 0.68], [0.9, 0.62], [0.2, 1.06], [-0.5, 1.1], [-1.2, 0.84]], W - 0.5, glass));
-    for (const s of [1, -1]) g.add(box(0.7, 0.18, 0.06, dark, -0.9, 0.55, s * (W / 2 + 0.01)));
-    g.add(box(0.4, 0.04, W + 0.04, dark, 2.1, 0.27, 0));
-    lights(g, 2.28, -2.28, 0.58, W / 2, 0.07);
-    if (aero >= 0.5) {
-      for (const z of [0.5, -0.5]) g.add(box(0.08, 0.2, 0.05, dark, -2.0, 0.94, z));
-      g.add(box(0.4, 0.05, W - 0.2, aero >= 0.75 ? dark : body, -2.02, 1.05, 0));
+    if (design === 1) {
+      // Cuña de motor central: perfil anguloso y rejillas sobre el motor
+      g.add(extrude([[-2.2, 0.26], [2.2, 0.26], [2.3, 0.34], [0.8, 0.66], [-1.6, 0.86], [-2.2, 0.86], [-2.26, 0.5]], W, body));
+      g.add(extrude([[-1.2, 0.83], [0.8, 0.66], [0.1, 1.02], [-0.7, 1.04]], W - 0.55, glass));
+      for (let i = 0; i < 5; i++) g.add(box(0.05, 0.03, 1.1, dark, -1.7 - i * 0.1, 0.875, 0));
+      for (const s of [1, -1]) {
+        const vent = extrude([[-1.3, 0.4], [-0.5, 0.4], [-0.6, 0.7]], 0.04, dark); vent.position.z = s * (W / 2 + 0.01); g.add(vent);
+      }
+      g.add(box(0.35, 0.04, W + 0.02, dark, 2.1, 0.27, 0));
+      lights(g, 2.22, -2.24, 0.42, W / 2, 0.05);
+      g.add(box(0.06, 0.08, W - 0.3, tailMat(), -2.23, 0.7, 0));
+      if (aero >= 0.5) wing(-1.95, 0.86, 0.26, 0.45, W);
+      hood(2.3, 0.34, 0.8, 0.66);
+      if (turboCount >= 3 || supercharger) g.add(box(0.4, 0.08, 0.5, dark, -1.2, 0.9, 0));
+      exhausts(g, -2.27, 0.42, Math.min(exCount, 4), 0.45);
+      addWheels(g, { wb: [1.4, -1.35], track: 0.88, rf: 0.35, rr: 0.39, wf: 0.29, wr: 0.36 }, rimColor);
+    } else if (design === 2) {
+      // Gran turismo de motor delantero: capó largo, cabina retrasada y branquias laterales
+      g.add(extrude([[-2.25, 0.28], [2.25, 0.28], [2.4, 0.4], [2.3, 0.58], [0.3, 0.78], [-1.5, 0.86], [-2.2, 0.82], [-2.3, 0.5]], W, body));
+      g.add(extrude([[-1.45, 0.84], [0.25, 0.78], [-0.35, 1.14], [-1.0, 1.16], [-1.62, 0.88]], W - 0.3, glass));
+      g.add(extrude([[-1.02, 1.14], [-0.33, 1.14], [-0.37, 1.21], [-1.0, 1.21]], W - 0.26, body));
+      for (const s of [1, -1]) for (let i = 0; i < 3; i++) g.add(box(0.05, 0.16, 0.02, dark, 0.75 + i * 0.12, 0.52, s * (W / 2 + 0.005)));
+      const bulge = box(1.4, 0.06, 0.6, body, 1.3, 0.69, 0); bulge.rotation.z = Math.atan2(-0.2, 2.0); g.add(bulge);
+      g.add(box(0.05, 0.12, 1.2, dark, 2.38, 0.45, 0));
+      g.add(box(0.4, 0.04, W + 0.04, dark, 2.2, 0.29, 0));
+      g.add(box(0.2, 0.05, W - 0.2, aero >= 0.75 ? dark : body, -2.12, 0.86, 0));
+      lights(g, 2.33, -2.3, 0.54, W / 2, 0.07);
+      mirrors(0.15, 0.92, W);
+      hood(2.3, 0.58, 0.3, 0.78, 1.4, 0.4);
+      if (turboCount >= 3 || supercharger) g.add(box(0.4, 0.06, 0.4, dark, 1.6, 0.66, 0));
+      exhausts(g, -2.31, 0.38, Math.max(2, Math.min(exCount, 4)), 0.55);
+      addWheels(g, { wb: [1.5, -1.4], track: 0.88, rf: 0.36, rr: 0.39, wf: 0.29, wr: 0.35 }, rimColor);
+    } else {
+      g.add(extrude([[-2.2, 0.26], [2.15, 0.26], [2.32, 0.36], [2.2, 0.5], [0.9, 0.68], [-1.5, 0.84], [-2.2, 0.84], [-2.28, 0.5]], W, body));
+      g.add(extrude([[-0.9, 0.68], [0.9, 0.62], [0.2, 1.06], [-0.5, 1.1], [-1.2, 0.84]], W - 0.5, glass));
+      for (const s of [1, -1]) g.add(box(0.7, 0.18, 0.06, dark, -0.9, 0.55, s * (W / 2 + 0.01)));
+      g.add(box(0.4, 0.04, W + 0.04, dark, 2.1, 0.27, 0));
+      lights(g, 2.28, -2.28, 0.58, W / 2, 0.07);
+      if (aero >= 0.5) wing(-2.0, 0.84, 0.2, 0.4, W - 0.1);
+      if (turboCount >= 3 || supercharger) g.add(box(0.5, 0.06, 0.5, dark, -1.4, 0.86, 0));
+      stripe = [1.55, 0.6, -0.138, 1.2, 0.16];
+      exhausts(g, -2.3, 0.45, Math.min(exCount, 3), 0.4);
+      addWheels(g, { wb: [1.4, -1.35], track: 0.88, rf: 0.35, rr: 0.39, wf: 0.29, wr: 0.35 }, rimColor);
     }
-    if (turboCount >= 3 || supercharger) g.add(box(0.5, 0.06, 0.5, dark, -1.4, 0.86, 0));
-    exhausts(g, -2.3, 0.45, Math.min(exCount, 3), 0.4);
-    addWheels(g, { wb: [1.4, -1.35], track: 0.88, rf: 0.35, rr: 0.39, wf: 0.29, wr: 0.35 }, rimColor);
   } else {
     // Bólido
     const W = 2.0;
-    g.add(extrude([[-2.3, 0.24], [2.25, 0.24], [2.42, 0.32], [2.3, 0.42], [1.1, 0.62], [-1.45, 0.78], [-2.28, 0.8], [-2.36, 0.48]], W, body));
-    g.add(extrude([[-1.0, 0.7], [0.95, 0.58], [0.05, 1.04], [-0.75, 1.07], [-1.4, 0.82]], W - 0.7, glass));
-    // pontones laterales
-    for (const s of [1, -1]) {
-      const pod = extrude([[-1.6, 0.3], [0.7, 0.3], [0.35, 0.66], [-1.5, 0.76]], 0.24, body);
-      pod.position.z = s * (W / 2 - 0.02); g.add(pod);
-      g.add(box(0.5, 0.2, 0.05, dark, 0.1, 0.5, s * (W / 2 + 0.11)));
+    const rearWing = (x, baseY, span) => {
+      const wingH = 0.25 + aero * 0.6;
+      const wingW = 0.35 + aero * 0.35;
+      for (const z of [0.4, -0.4]) g.add(box(0.1, wingH, 0.06, dark, x + 0.05, baseY + wingH / 2, z));
+      g.add(box(wingW, 0.06, span, aero >= 0.75 ? dark : body, x, baseY + wingH, 0));
+      for (const z of [span / 2, -span / 2]) g.add(box(wingW + 0.1, 0.22, 0.03, dark, x, baseY - 0.05 + wingH, z));
+    };
+    if (design === 1) {
+      // Prototipo de resistencia: cabina burbuja, aletas sobre las ruedas y aleta de tiburón
+      g.add(extrude([[-2.4, 0.22], [2.3, 0.22], [2.45, 0.3], [2.35, 0.42], [1.3, 0.55], [0.6, 0.5], [-1.6, 0.62], [-2.4, 0.62]], W, body));
+      for (const s of [1, -1]) {
+        const ff = extrude([[0.9, 0.4], [2.1, 0.4], [1.85, 0.8], [1.1, 0.82]], 0.42, body); ff.position.z = s * 0.72; g.add(ff);
+        const rf = extrude([[-2.1, 0.4], [-0.8, 0.4], [-1.05, 0.86], [-1.85, 0.86]], 0.46, body); rf.position.z = s * 0.72; g.add(rf);
+        g.add(box(0.3, 0.12, 0.05, dark, 0.45, 0.45, s * (W / 2 - 0.1)));
+      }
+      g.add(extrude([[-0.9, 0.55], [0.75, 0.5], [0.1, 1.0], [-0.6, 1.04], [-1.3, 0.66]], W - 1.05, glass));
+      g.add(extrude([[-0.55, 1.02], [-2.2, 0.62], [-2.2, 1.15], [-1.4, 1.08]], 0.04, body)); // aleta de tiburón
+      g.add(box(0.5, 0.05, W + 0.1, dark, 2.2, 0.23, 0));
+      lights(g, 2.4, -2.4, 0.5, W / 2 - 0.05, 0.06);
+      for (let i = 0; i < 5; i++) g.add(box(0.4, 0.16, 0.03, dark, -2.25, 0.3, -0.6 + i * 0.3));
+      rearWing(-2.1, 0.62, W - 0.05);
+      exhausts(g, -2.42, 0.48, Math.min(exCount, 2), 0.25);
+      addWheels(g, { wb: [1.5, -1.45], track: 0.88, rf: 0.36, rr: 0.4, wf: 0.3, wr: 0.38 }, rimColor);
+    } else if (design === 2) {
+      // Monoplaza de ruedas descubiertas: morro afilado, pontones, halo y alerones
+      const BW = 0.72;
+      const helmet = mat(isLight(car.color) ? '#24272c' : '#f2efe6', { roughness: 0.3, metalness: 0.2 });
+      g.add(extrude([[-2.0, 0.18], [2.5, 0.18], [2.6, 0.26], [1.0, 0.48], [0.1, 0.6], [-0.3, 0.76], [-1.5, 0.7], [-2.0, 0.5]], BW, body));
+      for (const s of [1, -1]) {
+        const pod = extrude([[-1.6, 0.2], [0.4, 0.2], [0.2, 0.55], [-1.4, 0.5]], 0.4, body); pod.position.z = s * 0.55; g.add(pod);
+        g.add(box(0.05, 0.25, 0.3, dark, 0.38, 0.38, s * 0.55));
+        // brazos de suspensión
+        for (const x of [1.75, -1.35]) for (const y of [0.3, 0.42]) g.add(box(0.04, 0.03, 0.75, dark, x, y, s * 0.62));
+      }
+      g.add(box(0.75, 0.03, 0.46, mat('#111214'), -0.05, 0.61, 0)); // hueco del piloto
+      const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.17, 1), helmet); head.position.set(-0.2, 0.8, 0); g.add(head);
+      g.add(box(0.04, 0.05, 0.3, mat('#203546'), -0.06, 0.82, 0)); // visera
+      g.add(box(0.06, 0.3, 0.06, dark, 0.32, 0.75, 0)); // halo
+      for (const z of [0.24, -0.24]) g.add(box(0.7, 0.05, 0.05, dark, -0.05, 0.92, z));
+      g.add(box(0.05, 0.05, 0.5, dark, 0.3, 0.92, 0));
+      g.add(extrude([[-0.45, 0.76], [-0.3, 1.02], [-0.7, 1.06], [-1.5, 0.72]], 0.3, body)); // toma de aire
+      g.add(box(0.5, 0.04, 2.0, dark, 2.4, 0.2, 0)); // alerón delantero
+      g.add(box(0.35, 0.03, 1.9, aero >= 0.75 ? dark : body, 2.3, 0.27, 0));
+      for (const z of [1.0, -1.0]) g.add(box(0.55, 0.2, 0.03, dark, 2.38, 0.27, z));
+      g.add(box(0.05, 0.1, 0.12, tailMat(), -2.02, 0.42, 0)); // luz de lluvia
+      rearWing(-1.95, 0.7, 1.5);
+      exhausts(g, -2.05, 0.56, 1, 0);
+      addWheels(g, { wb: [1.75, -1.35], track: 1.0, rf: 0.36, rr: 0.4, wf: 0.32, wr: 0.42 }, rimColor);
+    } else {
+      g.add(extrude([[-2.3, 0.24], [2.25, 0.24], [2.42, 0.32], [2.3, 0.42], [1.1, 0.62], [-1.45, 0.78], [-2.28, 0.8], [-2.36, 0.48]], W, body));
+      g.add(extrude([[-1.0, 0.7], [0.95, 0.58], [0.05, 1.04], [-0.75, 1.07], [-1.4, 0.82]], W - 0.7, glass));
+      // pontones laterales
+      for (const s of [1, -1]) {
+        const pod = extrude([[-1.6, 0.3], [0.7, 0.3], [0.35, 0.66], [-1.5, 0.76]], 0.24, body);
+        pod.position.z = s * (W / 2 - 0.02); g.add(pod);
+        g.add(box(0.5, 0.2, 0.05, dark, 0.1, 0.5, s * (W / 2 + 0.11)));
+      }
+      g.add(box(0.5, 0.05, W + 0.1, dark, 2.18, 0.25, 0)); // splitter
+      g.add(box(0.08, 0.06, W - 0.4, dark, 2.38, 0.33, 0));
+      lights(g, 2.32, -2.36, 0.55, W / 2, 0.06);
+      // difusor
+      for (let i = 0; i < 4; i++) g.add(box(0.4, 0.14, 0.03, dark, -2.2, 0.3, -0.45 + i * 0.3));
+      // alerón trasero según aerodinámica
+      const wingH = 0.25 + aero * 0.6;
+      const wingW = 0.35 + aero * 0.35;
+      for (const z of [0.55, -0.55]) g.add(box(0.1, wingH, 0.06, dark, -2.0, 0.8 + wingH / 2, z));
+      g.add(box(wingW, 0.06, W - 0.05, aero >= 0.75 ? dark : body, -2.05, 0.8 + wingH, 0));
+      for (const z of [W / 2 - 0.05, -(W / 2 - 0.05)]) g.add(box(wingW + 0.1, 0.22, 0.03, dark, -2.05, 0.75 + wingH, z));
+      // toma de aire superior
+      g.add(box(0.5, 0.14, 0.32, dark, -0.95, 1.08, 0));
+      stripe = [1.55, 0.53, -0.17, 1.2, 0.16];
+      exhausts(g, -2.38, 0.5, Math.min(exCount + (turboCount >= 3 ? 1 : 0), 4), 0.35);
+      addWheels(g, { wb: [1.45, -1.4], track: 0.9, rf: 0.36, rr: 0.4, wf: 0.3, wr: 0.38 }, rimColor);
     }
-    g.add(box(0.5, 0.05, W + 0.1, dark, 2.18, 0.25, 0)); // splitter
-    g.add(box(0.08, 0.06, W - 0.4, dark, 2.38, 0.33, 0));
-    lights(g, 2.32, -2.36, 0.55, W / 2, 0.06);
-    // difusor
-    for (let i = 0; i < 4; i++) g.add(box(0.4, 0.14, 0.03, dark, -2.2, 0.3, -0.45 + i * 0.3));
-    // alerón trasero según aerodinámica
-    const wingH = 0.25 + aero * 0.6;
-    const wingW = 0.35 + aero * 0.35;
-    for (const z of [0.55, -0.55]) g.add(box(0.1, wingH, 0.06, dark, -2.0, 0.8 + wingH / 2, z));
-    g.add(box(wingW, 0.06, W - 0.05, aero >= 0.75 ? dark : body, -2.05, 0.8 + wingH, 0));
-    for (const z of [W / 2 - 0.05, -(W / 2 - 0.05)]) g.add(box(wingW + 0.1, 0.22, 0.03, dark, -2.05, 0.75 + wingH, z));
-    // toma de aire superior
-    g.add(box(0.5, 0.14, 0.32, dark, -0.95, 1.08, 0));
-    if (turboCount >= 3 || supercharger) for (const s of [1, -1]) g.add(box(0.6, 0.06, 0.25, dark, -1.65, 0.81, s * 0.5));
-    exhausts(g, -2.38, 0.5, Math.min(exCount + (turboCount >= 3 ? 1 : 0), 4), 0.35);
-    addWheels(g, { wb: [1.45, -1.4], track: 0.9, rf: 0.36, rr: 0.4, wf: 0.3, wr: 0.38 }, rimColor);
+    if (turboCount >= 3 || supercharger) for (const s of [1, -1]) g.add(box(0.6, 0.06, 0.25, dark, -1.65, design === 2 ? 0.74 : 0.81, s * 0.5));
   }
 
   // franja de rareza en el capó para coches especiales
-  const STRIPE = { utilitario: [1.25, 0.775, -0.122], turismo: [1.55, 0.795, -0.11], coupe: [1.6, 0.755, -0.127], deportivo: [1.55, 0.6, -0.138], bolido: [1.55, 0.53, -0.17] };
-  if (st.overallTier >= 3 && STRIPE[pr.type.id]) {
-    const stripe = mat(legendary ? '#ffb627' : '#f5f1e8', { roughness: 0.5 });
-    const [sx, y, rot] = STRIPE[pr.type.id];
-    const s1 = box(1.2, 0.02, 0.16, stripe, sx, y, 0.16); s1.rotation.z = rot;
-    const s2 = s1.clone(); s2.position.z = -0.16;
+  if (st.overallTier >= 3 && stripe) {
+    const stripeM = mat(legendary ? '#ffb627' : '#f5f1e8', { roughness: 0.5 });
+    const [sx, y, rot, len, sz] = stripe;
+    const s1 = box(len, 0.02, 0.16, stripeM, sx, y, sz); s1.rotation.z = rot;
+    const s2 = s1.clone(); s2.position.z = -sz;
     g.add(s1, s2);
   }
   g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
