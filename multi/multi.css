@@ -210,6 +210,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .join { display: flex; gap: 8px; }
 .join input { width: 120px; text-transform: uppercase; letter-spacing: 0.2em; font-weight: 700; text-align: center; }
 .intro-note.error { color: #ff8a6a; }
+.intro-link { font-size: 13px; font-weight: 700; color: var(--muted); text-decoration: none; border-bottom: 1px solid var(--border); padding-bottom: 2px; }
+.intro-link:hover { color: var(--text); }
 .lobby-card { width: min(560px, 100%); display: flex; flex-direction: column; gap: 16px; padding: 28px; border-radius: 16px; background: var(--surface); border: 1px solid var(--border); }
 .room-code { font-family: var(--font-display); font-weight: 700; font-size: clamp(56px, 12vw, 88px); letter-spacing: 0.12em; line-height: 1; color: var(--text); }
 .room-link { display: flex; gap: 8px; }
