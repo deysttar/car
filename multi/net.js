@@ -82,6 +82,8 @@ export class HostRoom {
       this.emit('players', this.players);
       return;
     }
+    // Carrera en directo: posiciones y llegadas de cada invitado
+    if (m.t === 'rs' || m.t === 'rfin') { this.emit('race-msg', id, m); return; }
     const p = this.players.find((x) => x.id === id);
     if (!p) return;
     if (m.t === 'progress') { p.state = 'building'; p.step = m.step; }
@@ -152,11 +154,14 @@ export class GuestRoom {
     if (m.t === 'lobby') { this.players = m.players; this.mode = m.mode || 'classic'; this.emit('players', this.players); }
     else if (m.t === 'start') { this.mode = m.mode || this.mode; this.emit('start', m.seeds[this.myId]); }
     else if (m.t === 'race') this.emit('race', m.race);
+    else if (m.t === 'rstate') this.emit('rstate', m.rows);
+    else if (m.t === 'rres') this.emit('rres', m.res);
     else if (m.t === 'lobbyBack') this.emit('lobbyBack');
     else if (m.t === 'refused') this.emit('closed', m.why);
     else if (m.t === 'closed') this.emit('closed', 'El anfitrión ha cerrado la partida.');
   }
   progress(step) { if (this.conn && this.conn.open) this.conn.send({ t: 'progress', step }); }
+  send(m) { if (this.conn && this.conn.open) this.conn.send(m); }
   ready(car) { if (this.conn && this.conn.open) this.conn.send({ t: 'ready', car }); }
   close() { if (this.peer) this.peer.destroy(); }
 }
