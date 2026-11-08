@@ -3,7 +3,6 @@
 // el servidor puede repartir la semilla y todos los clientes ven exactamente lo mismo.
 import * as THREE from 'three';
 import { RARITY, INTAKES, TURBOS, CAR_TYPES } from '../data.js';
-import { stats } from '../sim.js';
 import { designName } from '../car3d.js';
 import { FAMILIES, rollEngineBuild, rollChassis, rollTraction, rollAero, rollPaint, rollTires, rollQC, QC_ITEMS, colorName, modelNameOf, engineCode, countingCode, perfTier, perfLabel, serialOf, newSeed, carFromSeed } from './build.js';
 import { Workshop, clock, tween, wait, ease } from './engine3d.js';
@@ -19,6 +18,7 @@ import { ReportDesk } from './report.js';
 import { CarShow } from './showroom.js';
 import { HostRoom, GuestRoom, cleanCode, MAX_PLAYERS } from './net.js';
 import { RaceScene, simulateRace, TRACK_ORIGIN } from './race.js';
+import { MODES, isV2, carStats, weightParts } from './rules.js';
 const CAR_NAME = Object.fromEntries(CAR_TYPES.map((t) => [t.id, t.name]));
 // «SUV coupé» ya dice que es un SUV: no se repite el tipo
 const fullTypeName = (spec) => { const t = CAR_NAME[spec.typeId] || spec.typeId, d = designName(spec); return d.toLowerCase().startsWith(t.toLowerCase()) ? d : `${t} ${d}`; };
@@ -30,7 +30,7 @@ let rig = null;   // coche en el elevador (fase de chasis)
 let drive = null; // transmisión (fase de tracción)
 let phase = 'chassis'; // qué hace el botón «Siguiente»
 let current = null; // resultado del motor que se está montando
-if (new URLSearchParams(location.search).has('debug')) window.__debug = { shop, clock, get rig() { return rig; } };
+if (new URLSearchParams(location.search).has('debug')) window.__debug = { shop, clock, get rig() { return rig; }, race: (r, id) => runRace(r, id) };
 
 // ---------- Sonido (WebAudio, sin ficheros) ----------
 let actx = null, muted = false;
@@ -242,7 +242,7 @@ let busy = false;
 async function runBuild(seed) {
   if (busy) return;
   busy = true;
-  const b = rollEngineBuild(seed);
+  const b = rollEngineBuild(seed, gameMode());
   const fam = FAMILIES[b.family];
   const serial = serialOf(seed);
   if (!room) history.replaceState(null, '', `?seed=${seed}${window.__debug ? '&debug' : ''}`);
@@ -839,7 +839,7 @@ async function runDyno() {
   beginPhase();
   const st = STATIONS.dyno;
   const b = current;
-  const stt = stats(rig.spec);
+  const stt = carStats(rig.spec);
   const hp = stt.hp;
   const peak = b.family === 'rotary' ? 8500 : b.family === 'turbine' ? 11000 : Math.min(7600, 5200 + b.count * 140);
   const redline = peak + (b.family === 'turbine' ? 1500 : 800);
@@ -887,7 +887,8 @@ async function runQC() {
   if (busy || !rig) return;
   beginPhase();
   const st = STATIONS.qc;
-  const qc = extras.qc = rollQC(current);
+  const v2 = isV2(rig.spec);
+  const qc = extras.qc = v2 ? { defect: -1, penalty: 0 } : rollQC(current);
   setStep(13);
   caption('Paso 13 · Control de calidad', '¿Pasa la inspección?', 'El coche va a la zona de calidad…');
   await drivePath([[st.x, st.z]], { yaw: 0, ground: (x, z) => dyno.heightAt(x, z) });
@@ -905,6 +906,26 @@ async function runQC() {
       marked++;
     }
   });
+  if (v2) {
+    // La fiabilidad sale ahora: puede ser un cochazo con un motor que no aguante la carrera
+    const rel = rig.spec.reliability;
+    const li = document.createElement('li');
+    li.innerHTML = '<span>Fiabilidad</span><b class="num">0 %</b>';
+    $('qcList').appendChild(li);
+    $('capSub').textContent = 'Prueba de resistencia: ¿cuánto aguantará el motor?';
+    await tween(2.0, (t) => { li.querySelector('b').textContent = `${Math.round(rel * t)} %`; }, ease.outCubic);
+    li.classList.add(rel >= 45 ? 'ok' : 'bad');
+    const label = rel >= 85 ? 'A prueba de bombas' : rel >= 65 ? 'Muy fiable' : rel >= 45 ? 'Normal' : rel >= 25 ? 'Delicado' : 'Bomba de relojería';
+    const risk = rel >= 65 ? 'Casi seguro que aguanta la carrera.' : rel >= 45 ? 'Lo normal es que termine la carrera.' : rel >= 25 ? 'Hay bastantes papeletas de que reviente en carrera.' : 'Lo raro será que llegue a la meta.';
+    caption('Paso 13 · Control de calidad', `Fiabilidad ${rel} %`, `${label}. ${risk}`);
+    punch($('capTitle'));
+    setRow('qc', `Fiabilidad ${rel} %`, perfTier(rel));
+    sfx.stamp(); sfx.reveal(perfTier(rel));
+    await wait(1.8);
+    $('qcHud').hidden = true;
+    endPhase('present', 'presentación', 13);
+    return;
+  }
   const ok = qc.defect < 0;
   caption('Paso 13 · Control de calidad', ok ? 'Aprobado' : 'Aprobado con un defecto leve', ok ? 'Todo en orden: ni un solo defecto.' : `${QC_ITEMS[qc.defect]}: un pequeño fallo de montaje (−${qc.penalty} puntos).`);
   punch($('capTitle'));
@@ -951,7 +972,7 @@ async function runPresent() {
   hall.spinning = true;
   hall.house(0.85, 1.6);
   // Ficha final
-  const st = stats(spec);
+  const st = carStats(spec);
   const rating = Math.max(1, Math.min(100, st.rating + (extras.tires?.bonus || 0) - (extras.qc?.penalty || 0)));
   const model = modelNameOf(b);
   const typeId = spec.typeId;
@@ -964,7 +985,7 @@ async function runPresent() {
     ['', '0-100 km/h', `${st.t0100.toFixed(1)} s`],
     ['', 'Punta', `${Math.round(st.vmax)} km/h`],
     ['', 'Fiabilidad', `${st.reliability}%`],
-    ['', 'Consumo', `${st.consumption} L/100`],
+    isV2(spec) ? ['', 'Peso', `${st.weightKg.toLocaleString('es-ES')} kg`] : ['', 'Consumo', `${st.consumption} L/100`],
   ].map(([c, l, v]) => `<div class="${c}"><span>${l}</span><b class="num">${v}</b></div>`).join('');
   $('summary').hidden = false;
   report.final = { rating, model, st, typeName: fullTypeName(spec) };
@@ -1004,7 +1025,7 @@ function reportData() {
     sections: [
       { title: 'Motor', rows: clean([row('Tipo', 'family'), row('Configuración', 'engine'), row('Cilindrada', 'intake'), row('Admisión', 'turbo'), row('Rendimiento', 'perf'), d && ['Banco de potencia', `${d.hp} CV a ${d.rpm} rpm`], d && ['Par máximo', `${d.nm} Nm`]]) },
       { title: 'Chasis y montaje', rows: clean([row('Chasis', 'chassis'), row('Tracción', 'traction'), row('Aerodinámica', 'aero'), row('Pintura', 'paint'), row('Ruedas y frenos', 'tires')]) },
-      { title: 'Prestaciones', rows: [['0-100 km/h', `${f.st.t0100.toFixed(1)} s`], ['Velocidad punta', `${Math.round(f.st.vmax)} km/h`], ['Fiabilidad', `${f.st.reliability} %`], ['Consumo', `${f.st.consumption} L/100 km`]] },
+      { title: 'Prestaciones', rows: [['0-100 km/h', `${f.st.t0100.toFixed(1)} s`], ['Velocidad punta', `${Math.round(f.st.vmax)} km/h`], ...(f.st.weightKg ? [['Peso', `${f.st.weightKg.toLocaleString('es-ES')} kg`], ['Potencia por tonelada', `${Math.round(f.st.pw)} CV/t`]] : []), ['Fiabilidad', `${f.st.reliability} %`], ['Consumo', `${f.st.consumption} L/100 km`]] },
       { title: 'Control de calidad', rows: clean([row('Resultado', 'qc')]) },
     ],
   };
@@ -1076,6 +1097,15 @@ const BOT_NAMES = ['Turbo Tina', 'Pistón Pepe', 'Rueda Rita', 'Bujía Bruno', '
 const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* sin almacenamiento */ } } };
 const playerName = () => ($('nameInput').value.trim() || 'Piloto').slice(0, 16);
 $('nameInput').value = store.get('rm-name') || '';
+// Modo de juego: lo elige quien juega solo o quien crea la sala; los invitados juegan al de la sala
+let pickedMode = MODES[store.get('rm-mode')] ? store.get('rm-mode') : 'classic';
+function gameMode() { return room ? room.mode || 'classic' : pickedMode; }
+function showMode() {
+  for (const b of document.querySelectorAll('#modePick button')) b.setAttribute('aria-pressed', b.dataset.mode === pickedMode ? 'true' : 'false');
+  $('modeDesc').textContent = MODES[pickedMode].desc;
+}
+for (const b of document.querySelectorAll('#modePick button')) b.addEventListener('click', () => { pickedMode = b.dataset.mode; store.set('rm-mode', pickedMode); showMode(); });
+showMode();
 const linkCode = cleanCode(new URLSearchParams(location.search).get('sala'));
 if (linkCode) { $('codeInput').value = linkCode; $('introMsg').textContent = `Te han invitado a la sala ${linkCode}: escribe tu nombre y pulsa «Unirse».`; }
 
@@ -1093,14 +1123,16 @@ function myCarEntry() {
   };
 }
 function botEntry() {
-  const c = carFromSeed(newSeed());
-  return { spec: c.spec, model: c.model, typeName: fullTypeName(c.spec), rating: stats(c.spec).rating, tires: { id: c.tires.id, bonus: c.tires.bonus }, qc: { penalty: c.qc.penalty } };
+  const c = carFromSeed(newSeed(), gameMode());
+  return { spec: c.spec, model: c.model, typeName: fullTypeName(c.spec), rating: carStats(c.spec).rating, tires: { id: c.tires.id, bonus: c.tires.bonus }, qc: { penalty: c.qc.penalty } };
 }
 
 function renderPlayers(players) {
   if (!room) return; // avisos que llegan después de salir de la sala
   $('playersList').innerHTML = players.map((p) => `<li><i class="dot ${p.state}"></i><b>${esc(p.name)}${p.id === room.myId ? ' (tú)' : ''}${p.id === 'host' ? ' · anfitrión' : ''}</b><span>${stateText(p)}</span></li>`).join('');
   $('rpList').innerHTML = players.map((p) => `<li><i class="dot ${p.state}"></i><b>${esc(p.name)}</b><span>${stateText(p)}</span></li>`).join('');
+  $('roomMode').textContent = `Modo ${MODES[gameMode()].name}`;
+  $('roomMode').title = MODES[gameMode()].desc;
   if (room.isHost) {
     $('roundBtn').disabled = players.length < 2;
     $('addBotBtn').disabled = players.length >= MAX_PLAYERS;
@@ -1161,7 +1193,7 @@ $('hostBtn').addEventListener('click', async () => {
   $('hostBtn').disabled = true;
   $('introMsg').classList.remove('error'); $('introMsg').textContent = 'Creando la sala…';
   try {
-    room = new HostRoom(playerName());
+    room = new HostRoom(playerName(), pickedMode);
     await room.create();
     wireRoom();
     showLobby();
@@ -1301,7 +1333,8 @@ function updateRaceHud() {
   const leader = order[0];
   $('rhList').innerHTML = order.map((c, i) => {
     let gap = '';
-    if (i > 0) {
+    if (c.rc.dnf && rs.time >= c.rc.stopT) gap = 'Abandono';
+    else if (i > 0) {
       if (c.done) gap = `+${(c.rc.finish - leader.rc.finish).toFixed(1)} s`;
       else { const lt = rs.time; const tAt = timeAtDist(leader.rc, c.s, rs.race.ds); gap = Number.isFinite(tAt) ? `+${Math.max(0, lt - tAt).toFixed(1)} s` : ''; }
     } else gap = c.done ? fmtTime(c.rc.finish) : 'Líder';
@@ -1313,10 +1346,15 @@ function updateRaceHud() {
   if (lap > lastLap) { if (lap === rs.race.laps && lastLap) toast('¡Última vuelta!'); lastLap = lap; }
   for (const c of rs.cars) for (const ev of c.rc.events) {
     const key = c.id + ev.s;
-    if (!seenEvents.has(key) && rs.time >= ev.t) { seenEvents.add(key); toast(`¡${c.entry.name} se pasa de frenada!`); }
+    if (!seenEvents.has(key) && rs.time >= ev.t) {
+      seenEvents.add(key);
+      const msg = { error: 'se pasa de frenada', spin: 'hace un trompo: demasiada potencia', blowup: '¡le revienta el motor!' }[ev.kind] || 'tiene un problema';
+      toast(`${c.entry.name} ${msg}`, ev.kind === 'blowup' ? 2600 : 1800);
+      if (ev.kind === 'blowup') { sfx.thud(1); sfx.buzz(); }
+    }
   }
   for (const c of rs.cars) if (c.done && !c.flagged) { c.flagged = true; if (c === leader && order.filter((x) => x.done).length === 1) toast(`¡${c.entry.name} gana la carrera!`, 2600); }
-  const last = Math.max(...rs.cars.map((c) => c.rc.finish));
+  const last = Math.max(...rs.cars.map((c) => (c.rc.dnf ? c.rc.stopT : c.rc.finish)));
   if (!finishedShown && rs.time > last + 2.5) { finishedShown = true; stopRumble(); showResults(); }
   else if (!finishedShown) setRumble(0.35 + Math.min(0.6, me.speed / 90));
 }
@@ -1330,10 +1368,13 @@ shop.onFrame.add(() => { if (raceOn) updateRaceHud(); });
 
 function showResults() {
   const rs = raceScene;
-  const order = [...rs.cars].sort((a, b) => a.rc.finish - b.rc.finish);
+  // Primero los que terminan (por tiempo); después los abandonos (el que más aguantó, delante)
+  const order = [...rs.cars].sort((a, b) => (a.rc.dnf - b.rc.dnf) || (a.rc.dnf ? b.rc.stopS - a.rc.stopS : a.rc.finish - b.rc.finish));
+  const winner = order.find((c) => !c.rc.dnf);
   const meIdx = order.findIndex((c) => c.id === rs.myId);
-  $('resTitle').textContent = meIdx === 0 ? '¡Has ganado!' : meIdx > 0 ? `Has quedado ${meIdx + 1}.º` : '¡Carrera terminada!';
-  $('resBody').innerHTML = order.map((c, i) => `<tr class="${c.id === rs.myId ? 'me' : ''}"><td>${i + 1}</td><td><b>${esc(c.entry.name)}</b></td><td>Ruleta ${esc(c.entry.model)}<small>${esc(c.entry.typeName)}</small></td><td class="t">${i ? '+' + (c.rc.finish - order[0].rc.finish).toFixed(2) + ' s' : fmtTime(c.rc.finish)}</td><td class="t">${fmtTime(Math.min(...c.rc.laps))}</td></tr>`).join('');
+  const meCar = order[meIdx];
+  $('resTitle').textContent = meCar && meCar.rc.dnf ? 'Motor roto: abandono' : meIdx === 0 ? '¡Has ganado!' : meIdx > 0 ? `Has quedado ${meIdx + 1}.º` : '¡Carrera terminada!';
+  $('resBody').innerHTML = order.map((c, i) => `<tr class="${c.id === rs.myId ? 'me' : ''}"><td>${i + 1}</td><td><b>${esc(c.entry.name)}</b></td><td>Ruleta ${esc(c.entry.model)}<small>${esc(c.entry.typeName)}</small></td><td class="t">${c.rc.dnf ? 'Abandono' : c === winner ? fmtTime(c.rc.finish) : '+' + (c.rc.finish - winner.rc.finish).toFixed(2) + ' s'}</td><td class="t">${c.rc.laps.length ? fmtTime(Math.min(...c.rc.laps)) : '—'}</td></tr>`).join('');
   const host = !room || room.isHost;
   $('newRoundBtn').hidden = !host;
   $('toLobbyBtn').hidden = !room || !room.isHost;

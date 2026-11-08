@@ -154,6 +154,14 @@
       <span class="intro-kicker">Modo multijugador</span>
       <h1 class="intro-title">Construye tu coche y gana la carrera</h1>
       <p class="intro-lead">Cada jugador monta su coche pieza a pieza: motor, chasis, tracción, ruedas, aerodinámica y pintura. Cuando todos terminan, se miden en el circuito.</p>
+      <div class="field mode-field">
+        <span id="modeLabel">Modo de juego</span>
+        <div class="mode-pick" id="modePick" role="group" aria-labelledby="modeLabel">
+          <button type="button" data-mode="classic" aria-pressed="true">Original</button>
+          <button type="button" data-mode="v2" aria-pressed="false">V2</button>
+        </div>
+        <small class="mode-desc" id="modeDesc"></small>
+      </div>
       <label class="field"><span>Tu nombre</span><input id="nameInput" maxlength="16" autocomplete="nickname" placeholder="Piloto" /></label>
       <div class="intro-actions">
         <button class="btn btn-primary btn-lg" id="hostBtn">Crear partida</button>
@@ -170,7 +178,7 @@
 
   <div class="overlay" id="lobby" hidden>
     <div class="lobby-card">
-      <span class="intro-kicker">Sala de la partida</span>
+      <div class="lobby-top"><span class="intro-kicker">Sala de la partida</span><span class="mode-badge" id="roomMode"></span></div>
       <div class="room-code num" id="roomCode">····</div>
       <div class="room-link"><input id="roomLink" readonly aria-label="Enlace para unirse" /><button class="btn" id="copyLink" type="button">Copiar enlace</button></div>
       <ul class="players" id="playersList"></ul>

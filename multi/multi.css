@@ -206,6 +206,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .field input { width: min(320px, 100%); }
 .field input:focus, .join input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.mode-pick { display: inline-flex; padding: 4px; gap: 4px; border-radius: 11px; border: 1px solid var(--border); background: rgba(255, 248, 238, 0.06); width: fit-content; }
+.mode-pick button { height: 40px; min-width: 104px; padding: 0 16px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-weight: 700; font-size: 14px; letter-spacing: normal; text-transform: none; }
+.mode-pick button[aria-pressed="true"] { background: var(--accent); color: #1a0d05; }
+.mode-desc { font-size: 13px; font-weight: 400; letter-spacing: normal; text-transform: none; color: var(--muted); max-width: 52ch; line-height: 1.45; }
+.lobby-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.mode-badge { padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; background: rgba(255, 106, 26, 0.16); color: var(--accent); white-space: nowrap; }
 .intro-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .join { display: flex; gap: 8px; }
 .join input { width: 120px; text-transform: uppercase; letter-spacing: 0.2em; font-weight: 700; text-align: center; }
@@ -283,6 +289,8 @@ body.racing .hud-top .steps, body.racing .caption, body.racing .ticket { display
   .intro-actions { flex-direction: column; align-items: stretch; width: 100%; }
   .intro-actions > .btn, #startBtn { width: 100%; }
   .field, .field input { width: 100%; }
+  .mode-pick { width: 100%; }
+  .mode-pick button { flex: 1; }
   .join input { flex: 1; width: auto; }
   .lobby-card { padding: 20px; }
   .lobby-actions { flex-direction: column-reverse; }

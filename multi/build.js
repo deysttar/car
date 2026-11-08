@@ -2,6 +2,7 @@
 // Todo sale de una semilla: la misma semilla da siempre el mismo motor. En partida online el
 // servidor generará la semilla (o el resultado) y cada cliente solo reproduce la animación.
 import { RARITY, ENGINES, INTAKES, TURBOS, CAR_TYPES, BODY_COLORS, TRACTIONS, AEROS, MODEL_NAMES } from '../data.js';
+import { pickUniform, pickTurboV2, triangular100 } from './rules.js';
 
 export function mulberry32(seed) {
   let a = seed >>> 0;
@@ -74,16 +75,20 @@ export function perfLabel(p) {
   return p >= 97 ? 'Perfecto' : p >= 90 ? 'Obra maestra' : p >= 80 ? 'Muy fino' : p >= 65 ? 'Bueno' : p >= 45 ? 'Normal' : p >= 25 ? 'Flojo' : 'Desastre';
 }
 
-export function rollEngineBuild(seed) {
+// mode 'v2': motor y cilindrada con la misma probabilidad, admisión por familia y fiabilidad propia
+export function rollEngineBuild(seed, mode = 'classic') {
   const rng = mulberry32(seed);
-  const engine = pickByTier(ENGINES, rng);
+  const v2 = mode === 'v2';
+  const engine = v2 ? pickUniform(ENGINES, rng) : pickByTier(ENGINES, rng);
   const family = familyOf(engine);
-  const intake = pickByTier(INTAKES, rng);
-  const turbo = pickByTier(TURBOS, rng);
+  const intake = v2 ? pickUniform(INTAKES, rng) : pickByTier(INTAKES, rng);
+  const turbo = v2 ? pickTurboV2(rng) : pickByTier(TURBOS, rng);
   const perf = Math.round(((rng() + rng()) / 2) * 100);
+  // Fiabilidad V2: tirada aparte (otra semilla derivada), con la misma forma que el rendimiento
+  const reliability = v2 ? triangular100(mulberry32((seed ^ 0x4b1d) >>> 0)) : null;
   // CV orientativos con la fórmula del juego (rendimiento 0-100 -> 60-130 del original).
   const hp = Math.round(engine.power * intake.mult * turbo.mult * (60 + perf * 0.7));
-  return { seed, engine, family, count: pieceCount(engine, family), intake, turbo, perf, hp };
+  return { seed, mode, engine, family, count: pieceCount(engine, family), intake, turbo, perf, hp, reliability };
 }
 
 // Chasis: solo entran los que tienen hueco para motor + cilindrada + admisión (el bólido, 10, siempre cabe).
@@ -100,7 +105,9 @@ export function rollChassis(b) {
   const car = {
     typeId: type.id, engineId: b.engine.id, intakeId: b.intake.id, turboId: b.turbo.id,
     tractionId: 'TT', aeroId: 'a25', perf: Math.round(60 + b.perf * 0.7), color, seed: Math.floor(rng() * 1e9),
+    mode: b.mode || 'classic',
   };
+  if (b.reliability != null) car.reliability = b.reliability;
   return { type, fits, need, car };
 }
 
@@ -161,9 +168,9 @@ export const serialOf = (seed) => 'RM-' + (seed >>> 0).toString(36).toUpperCase(
 export const newSeed = () => Math.floor(Math.random() * 2 ** 31);
 
 // El coche completo que sale de una semilla, sin animación (bots y comprobaciones de la carrera).
-export function carFromSeed(seed) {
-  const b = rollEngineBuild(seed);
+export function carFromSeed(seed, mode = 'classic') {
+  const b = rollEngineBuild(seed, mode);
   const ch = rollChassis(b);
   const spec = { ...ch.car, tractionId: rollTraction(b).id, aeroId: rollAero(b).id };
-  return { spec, model: modelNameOf(b), tires: rollTires(b), qc: rollQC(b), finish: rollPaint(b) };
+  return { spec, model: modelNameOf(b), tires: rollTires(b), qc: mode === 'v2' ? { defect: -1, penalty: 0 } : rollQC(b), finish: rollPaint(b) };
 }

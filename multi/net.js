@@ -23,8 +23,9 @@ function open(peer) {
 
 // Sala del anfitrión: lleva la lista de jugadores y reenvía a todos lo que haga falta.
 export class HostRoom {
-  constructor(name) {
+  constructor(name, mode = 'classic') {
     this.isHost = true;
+    this.mode = mode; // modo de juego de la sala (lo elige el anfitrión al crearla)
     this.myId = 'host';
     this.conns = new Map(); // id -> DataConnection
     this.players = [{ id: 'host', name, bot: false, state: 'lobby' }];
@@ -91,7 +92,7 @@ export class HostRoom {
 
   send(id, m) { const c = this.conns.get(id); if (c && c.open) c.send(m); }
   broadcast(m) { for (const c of this.conns.values()) if (c.open) c.send(m); }
-  broadcastLobby() { this.broadcast({ t: 'lobby', players: this.players.map(({ id, name, bot, state, step }) => ({ id, name, bot, state, step })) }); }
+  broadcastLobby() { this.broadcast({ t: 'lobby', mode: this.mode, players: this.players.map(({ id, name, bot, state, step }) => ({ id, name, bot, state, step })) }); }
 
   // El anfitrión es un jugador más: sus avisos pasan por el mismo sitio
   progress(step) { const me = this.players[0]; me.state = 'building'; me.step = step; this.broadcastLobby(); this.emit('players', this.players); }
@@ -111,7 +112,7 @@ export class HostRoom {
     this.locked = true;
     const seeds = {};
     for (const p of this.players) if (!p.bot) { seeds[p.id] = seedFor(p); p.state = 'building'; p.step = 1; p.car = null; }
-    this.broadcast({ t: 'start', seeds });
+    this.broadcast({ t: 'start', seeds, mode: this.mode });
     this.broadcastLobby();
     this.emit('players', this.players);
     return seeds.host;
@@ -148,8 +149,8 @@ export class GuestRoom {
     conn.send({ t: 'hello', name: this.name });
   }
   receive(m) {
-    if (m.t === 'lobby') { this.players = m.players; this.emit('players', this.players); }
-    else if (m.t === 'start') this.emit('start', m.seeds[this.myId]);
+    if (m.t === 'lobby') { this.players = m.players; this.mode = m.mode || 'classic'; this.emit('players', this.players); }
+    else if (m.t === 'start') { this.mode = m.mode || this.mode; this.emit('start', m.seeds[this.myId]); }
     else if (m.t === 'race') this.emit('race', m.race);
     else if (m.t === 'lobbyBack') this.emit('lobbyBack');
     else if (m.t === 'refused') this.emit('closed', m.why);

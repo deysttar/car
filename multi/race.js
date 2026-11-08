@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { tween, ease, mat, box, cyl } from './engine3d.js';
 import { buildCar } from '../car3d.js';
-import { stats } from '../sim.js';
+import { carStats, isV2 } from './rules.js';
 import { mulberry32 } from './build.js';
 
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
@@ -39,14 +39,23 @@ function trackProfile(curve) {
 
 // Lo que cuenta de cada coche para correr
 export function racePerf(entry) {
-  const st = stats(entry.spec);
+  const st = carStats(entry.spec);
+  const v2 = isV2(entry.spec);
   const vmax = st.vmax / 3.6;
   const t0100 = Math.max(1.8, st.t0100);
   const a0 = Math.min(18, (-vmax / t0100) * Math.log(1 - Math.min(0.95, 27.78 / vmax)));
   const tireBonus = (entry.tires && entry.tires.bonus) || 0;
-  const mu = Math.min(1.75, Math.max(0.85, 0.8 + 0.12 * st.grip + tireBonus * 0.012));
+  let mu = Math.min(1.75, Math.max(0.85, 0.8 + 0.12 * st.grip + tireBonus * 0.012));
   const penalty = (entry.qc && entry.qc.penalty) || 0;
-  return { vmax, a0, mu, reliability: st.reliability, penalty, hp: st.hp };
+  // V2: el peso cuenta en curva y en frenada (más kilos, menos paso por curva y frenadas más largas)
+  const heavy = v2 ? 1450 / st.weightKg : 1;
+  if (v2) mu *= Math.pow(heavy, 0.15);
+  const brake = G * mu * 0.9 + 3 * heavy;
+  // V2: demasiados CV por kilo para el agarre que hay = el coche se vuelve nervioso (trompos)
+  const spin = v2 ? Math.min(0.35, Math.max(0, st.pw / (230 * mu) - 1) * 0.25) : 0;
+  // V2: la fiabilidad es una tirada; si es baja, el motor puede reventar durante la carrera
+  const blow = v2 ? Math.pow((100 - st.reliability) / 100, 2.2) * 0.75 : 0;
+  return { vmax, a0, mu, brake, spin, blow, reliability: st.reliability, penalty, hp: st.hp, v2 };
 }
 
 // Simulación completa (la hace el anfitrión). entries: [{ id, name, spec, tires, qc, ... }]
@@ -81,6 +90,26 @@ export function simulateRace(entries, seed) {
       for (let s = s0; s < s0 + 26; s += DS) { const j = Math.round((s + grid) / DS); if (j < m) vlim[j] *= 0.32; }
       events.push({ s: s0, kind: 'error' });
     }
+    // Trompos por exceso de potencia (V2): a la salida de una curva, casi se para
+    for (let lap = 0; lap < LAPS; lap++) {
+      if (!p.spin || rng() >= p.spin) continue;
+      const corners = [];
+      for (let i = 0; i < n; i++) if (Math.abs(k[i]) > 0.012) corners.push(i);
+      if (!corners.length) continue;
+      const s0 = lap * L + corners[Math.floor(rng() * corners.length)] * DS;
+      for (let s = s0; s < s0 + 18; s += DS) { const j = Math.round((s + grid) / DS); if (j < m) vlim[j] = Math.min(vlim[j], 3); }
+      events.push({ s: s0, kind: 'spin' });
+    }
+    // Motor roto (V2): a partir de ahí el coche se va parando en 60 m y abandona
+    let stopJ = m - 1, dnf = false;
+    if (p.blow && rng() < p.blow) {
+      const sFail = (0.12 + rng() * 0.83) * LAPS * L;
+      const j0 = Math.round((sFail + grid) / DS);
+      stopJ = Math.min(m - 1, j0 + Math.round(60 / DS));
+      for (let j = j0; j <= stopJ; j++) vlim[j] = Math.min(vlim[j], Math.max(0.8, 38 * (1 - (j - j0) / (stopJ - j0))));
+      dnf = true;
+      events.push({ s: sFail, kind: 'blowup' });
+    }
     // Velocidad: acelera hasta el límite y frena a tiempo para el siguiente
     const v = new Float64Array(m);
     v[0] = 0;
@@ -88,22 +117,24 @@ export function simulateRace(entries, seed) {
       const a = p.a0 * Math.max(0.04, 1 - v[j] / p.vmax);
       v[j + 1] = Math.min(vlim[j + 1], Math.sqrt(v[j] * v[j] + 2 * a * DS));
     }
-    const brake = G * p.mu * 0.9 + 3;
+    const brake = p.brake;
     for (let j = m - 2; j >= 1; j--) v[j] = Math.min(v[j], Math.sqrt(v[j + 1] * v[j + 1] + 2 * brake * DS));
     // Tiempo en cada punto
     const t = new Array(m);
     t[0] = 0;
     for (let j = 0; j < m - 1; j++) t[j + 1] = t[j] + DS / Math.max(0.6, (v[j] + v[j + 1]) / 2);
     const timeAt = (s) => { const f = (s + grid) / DS, j = Math.floor(f); return t[j] + (t[j + 1] - t[j]) * (f - j); };
+    const stopS = -grid + stopJ * DS; // donde se queda parado si abandona
     const laps = []; let prev = timeAt(0);
-    for (let l = 1; l <= LAPS; l++) { const tl = timeAt(l * L); laps.push(tl - prev); prev = tl; }
-    for (const ev of events) ev.t = Math.round(timeAt(ev.s) * 100) / 100;
+    for (let l = 1; l <= LAPS && (!dnf || l * L < stopS); l++) { const tl = timeAt(l * L); laps.push(tl - prev); prev = tl; }
+    for (const ev of events) ev.t = Math.round(timeAt(Math.min(ev.s, stopS - DS)) * 100) / 100;
     return {
       id: e.id, grid,
-      t: t.map((x) => Math.round(x * 1000) / 1000),
-      finish: Math.round(timeAt(LAPS * L) * 1000) / 1000,
+      t: t.slice(0, stopJ + 1).map((x) => Math.round(x * 1000) / 1000),
+      finish: dnf ? null : Math.round(timeAt(LAPS * L) * 1000) / 1000,
+      dnf, stopS, stopT: Math.round(t[stopJ] * 1000) / 1000,
       laps: laps.map((x) => Math.round(x * 1000) / 1000),
-      events,
+      events: events.filter((ev) => !dnf || ev.s < stopS),
     };
   });
   return { seed, L, laps: LAPS, ds: DS, cars };
@@ -295,6 +326,7 @@ export class RaceScene {
   // Coloca los coches en la parrilla. entries: datos de cada jugador; race: lo que mandó el anfitrión
   setup(entries, race, myId) {
     for (const c of this.cars) this.group.remove(c.root);
+    if (this.smoke) { for (const sp of this.smoke) this.group.remove(sp); this.smoke = []; }
     this.race = race;
     this.myId = myId;
     this.cars = race.cars.map((rc, i) => {
@@ -347,10 +379,13 @@ export class RaceScene {
   // Clasificación en vivo: primero los que han terminado (por tiempo), después por distancia
   standings() {
     const total = this.race.laps * this.race.L;
+    const out = (c) => c.rc.dnf && this.time >= c.rc.stopT;
     return [...this.cars].sort((a, b) => {
       const fa = a.s >= total, fb = b.s >= total;
       if (fa && fb) return a.rc.finish - b.rc.finish;
       if (fa !== fb) return fa ? -1 : 1;
+      const oa = out(a), ob = out(b);
+      if (oa !== ob) return oa ? 1 : -1;
       return b.s - a.s;
     });
   }
@@ -368,9 +403,17 @@ export class RaceScene {
       for (const w of c.wheels) w.rotation.z += (w.position.z < 0 ? 1 : -1) * d / 0.36;
       if (!c.done && s >= total) c.done = true;
     }
+    // Coche roto: humo y a un lado de la pista
+    for (const c of this.cars) {
+      if (!c.rc.dnf) continue;
+      const broken = c.s >= c.rc.stopS - 60;
+      if (broken) this.puff(c, dt);
+    }
+    this.updateSmoke(dt);
     // Carriles: el que viene detrás se abre para adelantar en vez de atravesar al de delante
     for (const c of this.cars) {
       let target = c.lane;
+      if (c.rc.dnf && c.s >= c.rc.stopS - 60) { c.lat += (5.4 - c.lat) * Math.min(1, dt * 1.2); this.place(c, c.s); continue; }
       for (const o of this.cars) {
         if (o === c) continue;
         const gap = o.s - c.s;
@@ -380,6 +423,41 @@ export class RaceScene {
       this.place(c, c.s);
     }
     this.followCam(dt);
+  }
+
+  // Humo del motor roto
+  puff(c, dt) {
+    c.smokeT = (c.smokeT || 0) - dt;
+    if (c.smokeT > 0) return;
+    c.smokeT = 0.08;
+    if (!this.smokeTex) {
+      const cv = document.createElement('canvas'); cv.width = cv.height = 64;
+      const g = cv.getContext('2d'), gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+      gr.addColorStop(0, 'rgba(255,255,255,0.9)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+      this.smokeTex = new THREE.CanvasTexture(cv);
+      this.smoke = [];
+    }
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.smokeTex, color: Math.random() < 0.2 ? '#ff7a2a' : '#3a3a3a', transparent: true, opacity: 0.8, depthWrite: false }));
+    const fwd = V(Math.cos(c.root.rotation.y), 0, -Math.sin(c.root.rotation.y));
+    sp.position.copy(c.root.position).addScaledVector(fwd, 1.4).add(V((Math.random() - 0.5) * 0.4, 1.0, (Math.random() - 0.5) * 0.4));
+    sp.scale.setScalar(0.8);
+    sp.userData.life = 0;
+    this.group.add(sp);
+    this.smoke.push(sp);
+  }
+  updateSmoke(dt) {
+    if (!this.smoke) return;
+    for (let i = this.smoke.length - 1; i >= 0; i--) {
+      const sp = this.smoke[i];
+      sp.userData.life += dt;
+      const t = sp.userData.life / 2.4;
+      sp.position.y += dt * 1.6;
+      sp.position.x += dt * 0.6;
+      sp.scale.setScalar(0.8 + t * 3.5);
+      sp.material.opacity = Math.max(0, 0.8 * (1 - t));
+      if (t >= 1) { this.group.remove(sp); sp.material.dispose(); this.smoke.splice(i, 1); }
+    }
   }
 
   followCam(dt) {
