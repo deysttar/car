@@ -10,6 +10,7 @@ window.__step = async (until, budgetMs = 40000) => {
     d.clock.scale = 1;
     for (let k = 0; k < 10; k++) { s.frame(1 / 20, true); for (let m = 0; m < 6; m++) await Promise.resolve(); }
     await new Promise((r) => { const c = new MessageChannel(); c.port1.onmessage = r; c.port2.postMessage(0); });
+    const cp = document.getElementById('colorPick'); if (cp && !cp.hidden) cp.querySelector('button').click();
     if (until()) { s.frame(0); return 'hit'; }
     if (!btn.hidden && !btn.disabled && !document.body.classList.contains('building')) { __res.log.push(document.getElementById('capTitle').textContent); btn.click(); }
   }

@@ -492,3 +492,19 @@ body.reporting .final { top: auto; bottom: 20px; left: auto; right: 20px; transf
   .race-feedback { bottom: 150px; font-size: 20px; }
   .race-toast { top: 26%; font-size: 18px; padding: 8px 16px; }
 }
+
+/* Pintura: tres colores para elegir */
+.color-pick { position: fixed; right: 16px; bottom: 28px; z-index: 6; display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 16px 18px; border-radius: 18px; background: var(--surface); border: 1px solid var(--border); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.cp-title { font-family: var(--font-display); font-weight: 700; font-size: 20px; }
+.cp-opts { display: flex; gap: 12px; }
+.cp-opts button { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 108px; padding: 10px 8px; border-radius: 14px; border: 1px solid var(--border); background: rgba(255, 248, 238, 0.05); font-weight: 700; font-size: 14px; transition: transform 140ms var(--ease), border-color 140ms; }
+.cp-opts button:hover { transform: translateY(-3px); border-color: rgba(255, 248, 238, 0.4); }
+.cp-opts button i { width: 64px; height: 64px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, rgba(255,255,255,0.55), transparent 45%), var(--c); box-shadow: inset 0 -6px 12px rgba(0,0,0,0.35), 0 4px 12px rgba(0,0,0,0.35); }
+.qc-hud li.redo { color: #ffcf5a; }
+.qc-hud li.redo b { color: #ffcf5a; }
+@media (max-width: 760px) {
+  .color-pick { left: 8px; right: 8px; transform: none; bottom: 16px; }
+  .cp-opts { width: 100%; }
+  .cp-opts button { flex: 1; width: auto; }
+  .cp-opts button i { width: 52px; height: 52px; }
+}

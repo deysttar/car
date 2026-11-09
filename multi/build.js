@@ -155,8 +155,52 @@ export const TIRES = [
   { id: 'semi', name: 'Semislick', tier: 3, weight: 0.15, bonus: 6, brakes: 'Carbono-cerámicos', caliper: '#ffb627', rim: '#1d1f23', spokes: 6, desc: 'Casi de competición: se pegan al asfalto.' },
 ];
 export function rollTires(b) { return pickWeighted(TIRES, mulberry32((b.seed ^ 0x1b873593) >>> 0)); }
-// Control de calidad: casi siempre perfecto; a veces un defecto leve que resta puntos
-export const QC_ITEMS = ['Motor', 'Transmisión', 'Carrocería', 'Pintura', 'Electrónica'];
+// Pintura: tres colores al azar (distintos) para que el jugador elija
+export function colorOptions(b) {
+  const rng = mulberry32((b.seed ^ 0x2545f491) >>> 0);
+  const pool = [...BODY_COLORS], out = [];
+  while (out.length < 3) out.push(pool.splice(Math.floor(rng() * pool.length), 1)[0]);
+  return out;
+}
+
+// Control de calidad: cada parte puede fallar; si falla se vuelve a hacer y sale un resultado nuevo
+export const QC_PARTS = [
+  { id: 'engine', name: 'Motor', p: 0.08 },
+  { id: 'intake', name: 'Cilindrada', p: 0.08 },
+  { id: 'turbo', name: 'Admisión', p: 0.08 },
+  { id: 'perf', name: 'Rendimiento', p: 0.1 },
+  { id: 'traction', name: 'Tracción', p: 0.07 },
+  { id: 'aero', name: 'Aerodinámica', p: 0.07 },
+  { id: 'tires', name: 'Ruedas', p: 0.07 },
+  { id: 'paint', name: 'Pintura', p: 0.07 },
+];
+export const QC_ITEMS = QC_PARTS.map((q) => q.name);
+// Qué partes fallan (sale de la semilla: todos los jugadores verían lo mismo con la misma semilla)
+export function rollQCParts(b) {
+  const rng = mulberry32((b.seed ^ 0x68e31da4) >>> 0);
+  return QC_PARTS.map((q) => ({ ...q, fail: rng() < q.p }));
+}
+// La parte se vuelve a hacer: otro sorteo con las reglas del modo. typeSpace: hueco del chasis
+export function redoPart(id, b, spec, typeSpace) {
+  const v2 = b.mode === 'v2';
+  const rng = mulberry32((b.seed ^ 0x1f123bb5 ^ (id.length * 0x9e3779b1)) >>> 0);
+  const fits = (e, i, t) => e.space + i.space + t.space <= typeSpace;
+  if (id === 'engine' || id === 'intake' || id === 'turbo') {
+    for (let k = 0; k < 60; k++) {
+      const e = id === 'engine' ? (v2 ? pickUniform(ENGINES, rng) : pickByTier(ENGINES, rng)) : b.engine;
+      const i = id === 'intake' ? (v2 ? pickUniform(INTAKES, rng) : pickByTier(INTAKES, rng)) : b.intake;
+      const t = id === 'turbo' ? (v2 ? pickTurboV2(rng) : pickByTier(TURBOS, rng)) : b.turbo;
+      if (fits(e, i, t)) return id === 'engine' ? e : id === 'intake' ? i : t;
+    }
+    return id === 'engine' ? b.engine : id === 'intake' ? b.intake : b.turbo;
+  }
+  if (id === 'perf') return Math.round(((rng() + rng()) / 2) * 100);
+  if (id === 'traction') return pickWeighted(TRACTIONS, rng);
+  if (id === 'aero') return pickWeighted(AEROS, rng);
+  if (id === 'tires') return pickWeighted(TIRES, rng);
+  if (id === 'paint') return pickWeighted(FINISHES, rng);
+  return null;
+}
 export function rollQC(b) {
   const rng = mulberry32((b.seed ^ 0x68e31da4) >>> 0);
   const defect = rng() < 0.12 ? Math.floor(rng() * QC_ITEMS.length) : -1;

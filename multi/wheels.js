@@ -63,6 +63,8 @@ function makeWrench() {
 export async function swapWheels(rig, tire, sfx, onWheel, { onLift = false } = {}) {
   const car = rig.car;
   const olds = rig.body.filter((o) => o.userData.isWheel);
+  // Si ya se cambiaron antes (control de calidad), fuera los discos viejos
+  for (const o of [...car.children]) if (o.userData.isBrake) car.remove(o);
   // Gatos: el coche sube un poco para quitar las ruedas
   const jacks = [];
   const y0 = car.position.y, lift = 0.16;
@@ -102,6 +104,7 @@ export async function swapWheels(rig, tire, sfx, onWheel, { onLift = false } = {
     // Disco y pinza
     const br = makeBrake(r, w, tire);
     const bh = new THREE.Group(); bh.position.copy(home); bh.rotation.copy(rot); bh.add(br);
+    bh.userData.isBrake = true;
     bh.scale.setScalar(0.001);
     car.add(bh);
     await tween(0.3, (t) => grow(bh, V(1, 1, 1), t), ease.outBack);

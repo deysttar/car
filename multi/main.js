@@ -2,9 +2,9 @@
 // La animación solo reproduce un resultado ya decidido (rollEngineBuild), así en partida online
 // el servidor puede repartir la semilla y todos los clientes ven exactamente lo mismo.
 import * as THREE from 'three';
-import { RARITY, INTAKES, TURBOS, CAR_TYPES } from '../data.js';
+import { RARITY, INTAKES, TURBOS, CAR_TYPES, AEROS } from '../data.js';
 import { designName } from '../car3d.js';
-import { FAMILIES, rollEngineBuild, rollChassis, rollTraction, rollAero, rollPaint, rollTires, rollQC, QC_ITEMS, colorName, modelNameOf, engineCode, countingCode, perfTier, perfLabel, serialOf, newSeed, carFromSeed } from './build.js';
+import { FAMILIES, rollEngineBuild, rollChassis, rollTraction, rollAero, rollPaint, rollTires, rollQCParts, redoPart, colorOptions, familyOf, pieceCount, QC_ITEMS, colorName, modelNameOf, engineCode, countingCode, perfTier, perfLabel, serialOf, newSeed, carFromSeed } from './build.js';
 import { Workshop, clock, tween, wait, ease } from './engine3d.js';
 import { buildGarage, LIFT_X, STATIONS } from './garage.js';
 import { CarRig, pickupEngine, lowerEngine, refitIntake } from './chassis.js';
@@ -622,7 +622,7 @@ async function runAero() {
   await wait(1.6);
   // 5 · Kit aerodinámico según la carga (aún sin decir cuál)
   caption('Paso 10 · Aerodinámica', '¿Cuánta carga?', 'Se monta el kit aerodinámico…');
-  const kit = buildAeroKit(rig, ae.level, rig.spec.color);
+  const kit = extras.kit = buildAeroKit(rig, ae.level, rig.spec.color);
   // La cámara mira a la zaga, a la altura del alerón (en un SUV va en el techo)
   const wingW = kit.wing.getWorldPosition(new THREE.Vector3());
   await shop.shot([wingW.x - 3.0, wingW.y + 1.2, T.z + 4.2], [wingW.x + 0.9, wingW.y - 0.35, T.z], 1.4);
@@ -773,7 +773,6 @@ async function runPaint() {
   beginPhase();
   const st = STATIONS.paint;
   const fin = extras.finish = rollPaint(current);
-  const hex = rig.spec.color, cname = colorName(hex);
   setStep(11);
   caption('Paso 11 · Pintura', '¿De qué color?', 'El coche sale del túnel y va a la cabina de pintura…');
   const T = STATIONS.tunnel;
@@ -786,6 +785,12 @@ async function runPaint() {
   await drivePath(PATH.toPaint, { yaw: 0 });
   tunnel.closeDoor(sfx);
   await shop.shot(S(st, [4.6, 3.0, 7.0]), S(st, [0, 0.9, 0]), 1.0);
+  // Tres colores al azar: elige el jugador
+  caption('Paso 11 · Pintura', 'Elige el color', 'La cabina tiene tres colores preparados. ¿Cuál quieres?');
+  const hex = rig.spec.color = await pickColor(colorOptions(current));
+  const cname = colorName(hex);
+  sfx.stamp();
+  $('capSub').textContent = `${cname}. Los robots se ponen a pintar…`;
   const P = rig.paint, base = new THREE.Color(hex);
   P.uPaint.value.copy(base);
   if (fin.id === 'pearl') P.uPaint2.value.copy(base).offsetHSL(0.12, 0.05, 0.14);
@@ -799,7 +804,20 @@ async function runPaint() {
   setRow('paint', `${cname} · ${fin.name}`, fin.tier);
   sfx.stamp(); sfx.reveal(fin.tier);
   await shop.shot(S(st, [5.0, 2.2, 5.8]), S(st, [0, 0.9, 0]), 1.6);
-  endPhase('dyno', 'banco de potencia', 11);
+  endPhase('qc', 'control de calidad', 11);
+}
+
+// Selector de color: tres muestras grandes; devuelve el color elegido
+function pickColor(options) {
+  return new Promise((resolve) => {
+    const box = $('colorPick'), list = $('cpOpts');
+    list.innerHTML = options.map((hex) => `<button type="button" data-hex="${hex}" style="--c:${hex}"><i></i><span>${colorName(hex)}</span></button>`).join('');
+    box.hidden = false;
+    for (const b of list.children) b.addEventListener('click', () => {
+      box.hidden = true;
+      resolve(b.dataset.hex);
+    }, { once: true });
+  });
 }
 
 // 9 · Ruedas y frenos: el coche sigue arriba en el elevador
@@ -843,8 +861,8 @@ async function runDyno() {
   const hp = stt.hp;
   const peak = b.family === 'rotary' ? 8500 : b.family === 'turbine' ? 11000 : Math.min(7600, 5200 + b.count * 140);
   const redline = peak + (b.family === 'turbine' ? 1500 : 800);
-  setStep(12);
-  caption('Paso 12 · Banco de potencia', '¿Cuánta potencia?', 'El coche va al banco de rodillos…');
+  setStep(13);
+  caption('Paso 13 · Banco de potencia', '¿Cuánta potencia?', 'El coche va al banco de rodillos…');
   await drivePath([[dyno.stopX(rig), st.z]], { yaw: 0, ground: (x, z) => dyno.heightAt(x, z) });
   await shop.shot(S(st, [4.8, 2.2, 6.6]), S(st, [-0.3, 0.6, 0]), 1.0);
   $('capSub').textContent = 'El carro de rodillos se ajusta a la batalla y se ata el coche…';
@@ -856,7 +874,7 @@ async function runDyno() {
   $('dynoPeak').setAttribute('cx', -10);
   $('dynoHud').hidden = false;
   for (const n of ['3', '2', '1']) { $('capTitle').textContent = n; punch($('capTitle')); sfx.tick(); tone(660, 0.12, 'square', 0.04); await wait(0.6); }
-  caption('Paso 12 · Banco de potencia', '¡A fondo!', 'El motor sube de vueltas hasta el corte…');
+  caption('Paso 13 · Banco de potencia', '¡A fondo!', 'El motor sube de vueltas hasta el corte…');
   startRumble();
   shop.shot(S(st, [-5.0, 1.5, 4.6]), S(st, [0, 0.7, 0]), 1.6);
   let dHp = '', dTq = '', best = { cv: 0, rpm: 0 };
@@ -871,7 +889,7 @@ async function runDyno() {
   });
   stopRumble();
   $('dynoPeak').setAttribute('cx', X(best.rpm)); $('dynoPeak').setAttribute('cy', Y(best.cv));
-  caption('Paso 12 · Banco de potencia', `${hp} CV`, `Potencia máxima a ${Math.round(best.rpm / 100) * 100} rpm · par máximo ${Math.round(maxTq)} Nm.`);
+  caption('Paso 13 · Banco de potencia', `${hp} CV`, `Potencia máxima a ${Math.round(best.rpm / 100) * 100} rpm · par máximo ${Math.round(maxTq)} Nm.`);
   punch($('capTitle'));
   report.dyno = { hp, rpm: Math.round(best.rpm / 100) * 100, nm: Math.round(maxTq) };
   sfx.stamp(); sfx.reveal(Math.min(6, stt.overallTier + 1));
@@ -879,33 +897,117 @@ async function runDyno() {
   $('dynoHud').hidden = true;
   await dyno.teardown(rig);
   await shop.shot(S(st, [4.8, 2.2, 5.8]), S(st, [0, 0.8, 0]), 1.2);
-  endPhase('qc', 'control de calidad', 12);
+  endPhase('present', 'presentación', 13);
 }
 
 // 13 · Control de calidad (arco escáner)
+// Texto de cada parte tal y como va en el coche ahora mismo (para la lista del escáner)
+function partText(id) {
+  const b = current;
+  switch (id) {
+    case 'engine': return engineCode(b.family, b.count);
+    case 'intake': return b.intake.name;
+    case 'turbo': return turboName(b.turbo);
+    case 'perf': return `${b.perf}/100`;
+    case 'traction': return drive.traction.name;
+    case 'aero': return AEROS_BY_ID[rig.spec.aeroId].name.split(' ')[0];
+    case 'tires': return extras.tires ? extras.tires.name : '—';
+    case 'paint': return extras.finish ? extras.finish.name : '—';
+  }
+  return '';
+}
+const AEROS_BY_ID = Object.fromEntries(AEROS.map((a) => [a.id, a]));
+const tierOf = (id) => {
+  const b = current;
+  return { engine: b.engine.tier, intake: b.intake.tier, turbo: b.turbo.tier, perf: perfTier(b.perf), traction: drive.traction.tier, aero: AEROS_BY_ID[rig.spec.aeroId].tier, tires: extras.tires && extras.tires.tier, paint: extras.finish && extras.finish.tier }[id] || 1;
+};
+
+// Se vuelve a hacer una parte: nuevo sorteo, se monta (con su animación si se ve) y se apunta
+async function redo(id) {
+  const b = current, spec = rig.spec;
+  const type = CAR_TYPES.find((t) => t.id === spec.typeId);
+  const v = redoPart(id, b, spec, type.space);
+  if (id === 'engine') {
+    b.engine = v; b.family = familyOf(v); b.count = pieceCount(v, b.family); spec.engineId = v.id;
+    setRow('family', FAMILIES[b.family].name); setRow('engine', engineCode(b.family, b.count), v.tier);
+  } else if (id === 'intake') { b.intake = v; spec.intakeId = v.id; setRow('intake', v.name, v.tier); }
+  else if (id === 'turbo') { b.turbo = v; spec.turboId = v.id; setRow('turbo', turboName(v), v.tier); }
+  else if (id === 'perf') { b.perf = v; spec.perf = Math.round(60 + v * 0.7); setRow('perf', `${v} / 100`, perfTier(v)); }
+  else if (id === 'traction') { drive.traction = v; spec.tractionId = v.id; setRow('traction', v.name, v.tier); }
+  else if (id === 'aero') {
+    // Fuera el kit anterior y se monta el nuevo
+    spec.aeroId = v.id;
+    if (extras.kit) { rig.car.remove(extras.kit.group); for (const o of extras.kit.hide) { o.visible = true; } }
+    const kit = extras.kit = buildAeroKit(rig, v.level, spec.color);
+    await fitAeroKit(kit, sfx);
+    setRow('aero', v.name, v.tier);
+  } else if (id === 'tires') {
+    extras.tires = v;
+    const car = rig.car;
+    await swapWheels(rig, v, sfx, (home, sd) => { const w = car.localToWorld(home.clone()); shop.shot([w.x + 1.2, 1.1, w.z + sd * 2.4], [w.x, 0.45, w.z], 0.5); });
+    setRow('tires', v.name, v.tier);
+  } else if (id === 'paint') {
+    // Repintado rápido con el nuevo acabado (mismo color)
+    extras.finish = v;
+    const P = rig.paint, base = new THREE.Color(spec.color);
+    if (v.id === 'pearl') P.uPaint2.value.copy(base).offsetHSL(0.12, 0.05, 0.14);
+    else if (v.id === 'duo') P.uPaint2.value.set(isLightHex(spec.color) ? '#2b2d33' : '#efece4');
+    else P.uPaint2.value.copy(base);
+    sfx.spray(true);
+    const r0 = P.uPRough.value, m0 = P.uPMetal.value;
+    P.uFinish.value = v.code;
+    await tween(1.2, (t) => { P.uPRough.value = r0 + (v.rough - r0) * t; P.uPMetal.value = m0 + (v.metal - m0) * t; }, ease.inOutCubic);
+    sfx.spray(false);
+    setRow('paint', `${colorName(spec.color)} · ${v.name}`, v.tier);
+  }
+}
+
+// 12 · Control de calidad (arco escáner): cada parte puede fallar; la que falla se rehace
 async function runQC() {
   if (busy || !rig) return;
   beginPhase();
   const st = STATIONS.qc;
   const v2 = isV2(rig.spec);
-  const qc = extras.qc = v2 ? { defect: -1, penalty: 0 } : rollQC(current);
-  setStep(13);
-  caption('Paso 13 · Control de calidad', '¿Pasa la inspección?', 'El coche va a la zona de calidad…');
-  await drivePath([[st.x, st.z]], { yaw: 0, ground: (x, z) => dyno.heightAt(x, z) });
+  const parts = rollQCParts(current);
+  extras.qc = { defect: -1, penalty: 0, redone: [] };
+  setStep(12);
+  caption('Paso 12 · Control de calidad', '¿Pasa la inspección?', 'El coche va a la zona de calidad…');
+  await drivePath([[st.x, st.z]], { yaw: 0 });
   await shop.shot(S(st, [4.0, 3.0, 6.8]), S(st, [0, 1.0, 0]), 1.0);
-  $('capSub').textContent = 'El escáner revisa el coche de punta a punta…';
-  $('qcList').innerHTML = QC_ITEMS.map((n) => `<li><span>${n}</span><b>…</b></li>`).join('');
+  $('capSub').textContent = 'El escáner revisa cada pieza…';
+  $('qcList').innerHTML = parts.map((q) => `<li><span>${q.name}</span><b>…</b></li>`).join('');
   $('qcHud').hidden = false;
   const items = [...$('qcList').children];
   let marked = 0;
   await scanner.sweep(rig, (f) => {
     while (marked < items.length && f > (marked + 1) / (items.length + 1)) {
-      const li = items[marked];
-      if (marked === qc.defect) { li.classList.add('bad'); li.querySelector('b').textContent = '⚠ leve'; sfx.buzz(); }
-      else { li.classList.add('ok'); li.querySelector('b').textContent = '✓'; tone(1320, 0.08, 'triangle', 0.05); }
+      const li = items[marked], q = parts[marked];
+      if (q.fail) { li.classList.add('bad'); li.querySelector('b').textContent = '⚠ falla'; sfx.buzz(); }
+      else { li.classList.add('ok'); li.querySelector('b').textContent = partText(q.id); tone(1320, 0.08, 'triangle', 0.05); }
       marked++;
     }
   });
+  // Lo que ha fallado se vuelve a hacer, una pieza detrás de otra
+  const failed = parts.filter((q) => q.fail);
+  for (const q of failed) {
+    const li = items[parts.indexOf(q)], before = partText(q.id);
+    caption('Paso 12 · Control de calidad', `Falla: ${q.name.toLowerCase()}`, 'Se desmonta y se vuelve a hacer. Puede salir mejor… o peor.');
+    punch($('capTitle'));
+    li.classList.remove('bad'); li.classList.add('redo');
+    li.querySelector('b').textContent = '↻ rehaciendo';
+    await shop.shot(S(st, [3.4, 2.4, 5.6]), S(st, [0, 0.8, 0]), 0.8);
+    sfx.impact(0.6);
+    await redo(q.id);
+    const after = partText(q.id), tier = tierOf(q.id);
+    li.classList.remove('redo'); li.classList.add('ok');
+    li.querySelector('b').textContent = after;
+    caption('Paso 12 · Control de calidad', `${q.name}: ${after}`, before === after ? 'Ha vuelto a salir lo mismo.' : `Antes: ${before}. Ahora: ${after}.`);
+    punch($('capTitle'));
+    sfx.stamp(); sfx.reveal(tier);
+    extras.qc.redone.push({ part: q.name, before, after });
+    await wait(1.4);
+  }
+  await shop.shot(S(st, [4.0, 3.0, 6.8]), S(st, [0, 1.0, 0]), 0.8);
   if (v2) {
     // La fiabilidad sale ahora: puede ser un cochazo con un motor que no aguante la carrera
     const rel = rig.spec.reliability;
@@ -917,23 +1019,19 @@ async function runQC() {
     li.classList.add(rel >= 45 ? 'ok' : 'bad');
     const label = rel >= 85 ? 'A prueba de bombas' : rel >= 65 ? 'Muy fiable' : rel >= 45 ? 'Normal' : rel >= 25 ? 'Delicado' : 'Bomba de relojería';
     const risk = rel >= 65 ? 'Casi seguro que aguanta la carrera.' : rel >= 45 ? 'Lo normal es que termine la carrera.' : rel >= 25 ? 'Hay bastantes papeletas de que reviente en carrera.' : 'Lo raro será que llegue a la meta.';
-    caption('Paso 13 · Control de calidad', `Fiabilidad ${rel} %`, `${label}. ${risk}`);
+    caption('Paso 12 · Control de calidad', `Fiabilidad ${rel} %`, `${label}. ${risk}`);
     punch($('capTitle'));
-    setRow('qc', `Fiabilidad ${rel} %`, perfTier(rel));
+    setRow('qc', `Fiabilidad ${rel} %${failed.length ? ` · ${failed.length} rehecha${failed.length > 1 ? 's' : ''}` : ''}`, perfTier(rel));
     sfx.stamp(); sfx.reveal(perfTier(rel));
-    await wait(1.8);
-    $('qcHud').hidden = true;
-    endPhase('present', 'presentación', 13);
-    return;
+  } else {
+    caption('Paso 12 · Control de calidad', failed.length ? 'Aprobado tras rehacer' : 'Aprobado a la primera', failed.length ? `Se rehicieron: ${failed.map((q) => q.name.toLowerCase()).join(', ')}.` : 'Todo en orden: ninguna pieza ha fallado.');
+    punch($('capTitle'));
+    setRow('qc', failed.length ? `${failed.length} pieza${failed.length > 1 ? 's' : ''} rehecha${failed.length > 1 ? 's' : ''}` : 'Perfecto', failed.length ? 2 : 3);
+    sfx.stamp(); sfx.reveal(failed.length ? 2 : 4);
   }
-  const ok = qc.defect < 0;
-  caption('Paso 13 · Control de calidad', ok ? 'Aprobado' : 'Aprobado con un defecto leve', ok ? 'Todo en orden: ni un solo defecto.' : `${QC_ITEMS[qc.defect]}: un pequeño fallo de montaje (−${qc.penalty} puntos).`);
-  punch($('capTitle'));
-  setRow('qc', ok ? 'Perfecto' : 'Defecto leve', ok ? 3 : 1);
-  sfx.stamp(); sfx.reveal(ok ? 4 : 1);
   await wait(1.8);
   $('qcHud').hidden = true;
-  endPhase('present', 'presentación', 13);
+  endPhase('dyno', 'banco de potencia', 12);
 }
 
 // 14 · Presentación (plataforma central)
@@ -945,7 +1043,7 @@ async function runPresent() {
   caption('Paso 14 · Presentación', 'Gran final', 'El coche sale del taller rumbo al salón del automóvil…');
   // Sale del taller y, a mitad de camino, fundido a negro: cambio de escena
   let fading = null;
-  await drivePath(PATH.toShow, { onU: (u) => { if (u > 0.45 && !fading) fading = fade(1, 1.1); } });
+  await drivePath(PATH.toShow, { ground: (x, z) => dyno.heightAt(x, z), onU: (u) => { if (u > 0.45 && !fading) fading = fade(1, 1.1); } });
   await fading;
   // En negro: el coche ya está en la peana del salón, tapado con la lona y con la sala a oscuras
   garage.group.visible = false;

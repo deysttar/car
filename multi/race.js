@@ -13,17 +13,18 @@ import { mulberry32 } from './build.js';
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
 export const TRACK_ORIGIN = { x: 0, z: 760 };
 export const LAPS = 2;
-const ARCADE = 1.25; // todo un poco más rápido que la realidad: es un juego
+const ARCADE = 1.35; // todo un poco más rápido que la realidad: es un juego
 const W = 14;            // ancho de la pista
 const DS = 2;            // muestreo del trazado (m)
 const G = 9.81;
-const SCALE = 1.7;
-// Recta de meta, horquilla, enlazadas, curva rápida y vuelta a meta (≈1,2 km)
-const POINTS = [[0, 0], [70, 0], [130, 4], [168, 28], [172, 70], [142, 96], [96, 88], [70, 112], [28, 138], [-30, 134], [-78, 112], [-96, 66], [-80, 24], [-42, 4]]
-  .map(([x, z]) => [x * SCALE, z * SCALE]);
-const CORNER_K = 0.0055; // curvatura a partir de la cual es curva (radio < 180 m)
+const EDGE = W / 2 - 1.3; // hasta dónde se abre la trazada sin pisar el piano
+// Circuito técnico (≈1,6 km): recta de meta, horquilla, chicane, 90° a la izquierda, curva rápida
+// larga, derecha cerrada, eses, izquierda larga y la última secuencia antes de meta.
+const POINTS = [[0, 0], [150, 0], [290, 0], [322, 8], [334, 35], [320, 60], [290, 64], [258, 62], [238, 76], [234, 98], [212, 116], [196, 140], [206, 166], [245, 176], [300, 178], [350, 190], [372, 222], [368, 262], [340, 286], [302, 288], [266, 272], [244, 246], [208, 248], [182, 274], [150, 298], [95, 306], [40, 302], [0, 290], [-24, 262], [-22, 230], [-5, 205], [20, 185], [24, 150], [4, 122], [-30, 104], [-44, 70], [-40, 35], [-22, 10]];
+const CORNER_K = 0.006; // curvatura a partir de la cual es curva (radio < 165 m)
 
 // ---------- Trazado ----------
+const smooth = (src, r) => { const n = src.length, out = new Float64Array(n); for (let i = 0; i < n; i++) { let a = 0; for (let j = -r; j <= r; j++) a += src[(i + j + n) % n]; out[i] = a / (2 * r + 1); } return out; };
 function buildTrack() {
   const curve = new THREE.CatmullRomCurve3(POINTS.map(([x, z]) => V(x, 0, z)), true, 'centripetal');
   const L = curve.getLength(), n = Math.round(L / DS);
@@ -36,37 +37,48 @@ function buildTrack() {
     d = Math.atan2(Math.sin(d), Math.cos(d));
     raw[i] = d / (2 * DS);
   }
-  const k = new Float64Array(n);
-  for (let i = 0; i < n; i++) { let a = 0; for (let j = -4; j <= 4; j++) a += raw[(i + j + n) % n]; k[i] = a / 9; }
-  // Curvas: cada pico de curvatura es una curva; entra y sale donde la curvatura baja a la mitad
-  const ak = (q) => Math.abs(k[((q % n) + n) % n]);
+  const k = smooth(raw, 4);           // curvatura del eje de la pista
+  // Trazada ideal: por fuera al entrar, al vértice por dentro y por fuera al salir. Sale de comparar la
+  // curvatura cercana con la de un tramo más largo; el lado interior es el contrario al signo de k.
+  const kn = smooth(raw, 6), kw = smooth(raw, 32);
+  const rawLine = new Float64Array(n);
+  for (let i = 0; i < n; i++) rawLine[i] = -Math.max(-1, Math.min(1, (2 * kn[i] - kw[i]) * 34)) * EDGE;
+  const line = smooth(rawLine, 10);
+  // Lo cerrada que es la curva por la trazada (abrir la curva = radio más grande) y sin trazada
+  const kLine = new Float64Array(n), kAxis = new Float64Array(n);
+  for (let i = 0; i < n; i++) { kAxis[i] = Math.abs(kn[i]); kLine[i] = Math.abs(kn[i]) * 0.74; }
+  // Curvas: cada pico de curvatura; entra y sale donde la curvatura baja a la mitad
+  const ak = (q) => Math.abs(kn[((q % n) + n) % n]);
   const corners = [];
-  const WIN = 25; // dos curvas necesitan al menos 50 m entre vértices
+  const WIN = 25;
   for (let p = 0; p < n; p++) {
     if (ak(p) < CORNER_K) continue;
     let peak = true;
     for (let q = p - WIN; q <= p + WIN && peak; q++) if (q !== p && (ak(q) > ak(p) || (ak(q) === ak(p) && q < p))) peak = false;
     if (!peak) continue;
-    const thr = ak(p) * 0.5, sg = Math.sign(k[p]);
+    const thr = ak(p) * 0.5, sg = Math.sign(kn[p]);
     let a = p, b = p;
-    while (p - a < 60 && ak(a - 1) > thr && Math.sign(k[((a - 1) % n + n) % n]) === sg) a--;
-    while (b - p < 60 && ak(b + 1) > thr && Math.sign(k[(b + 1) % n]) === sg) b++;
-    corners.push({ start: a * DS, end: Math.max(b, a + 4) * DS, kmax: ak(p), side: sg });
+    while (p - a < 60 && ak(a - 1) > thr && Math.sign(kn[((a - 1) % n + n) % n]) === sg) a--;
+    while (b - p < 60 && ak(b + 1) > thr && Math.sign(kn[(b + 1) % n]) === sg) b++;
+    corners.push({ start: a * DS, end: Math.max(b, a + 4) * DS, apex: p * DS, kmax: ak(p), side: sg });
   }
   corners.sort((x, y) => x.start - y.start);
-  // Trozos seguidos de la misma curva larga (mismo sentido y casi pegados): una sola curva
   for (let q = corners.length - 1; q > 0; q--) {
     const a = corners[q - 1], b = corners[q];
-    if (b.side === a.side && b.start - a.end < 24) { a.end = Math.max(a.end, b.end); a.kmax = Math.max(a.kmax, b.kmax); corners.splice(q, 1); }
+    // Trozos de la misma curva, o curvas encadenadas (chicane, eses): una sola frenada
+    if ((b.side === a.side && b.start - a.end < 24) || b.start - a.end < 45) { a.end = Math.max(a.end, b.end); if (b.kmax > a.kmax) { a.kmax = b.kmax; a.apex = b.apex; a.side = b.side; } corners.splice(q, 1); }
     else if (b.start < a.end) b.start = a.end;
   }
   corners.forEach((c, q) => (c.id = q));
-  return { curve, L, n, P, T, k, corners };
+  return { curve, L, n, P, T, k, kn, line, kLine, kAxis, corners };
 }
 const TRACK = buildTrack();
 export const TRACK_LENGTH = TRACK.L;
 export const CORNERS = TRACK.corners;
 
+const idx = (s) => { const n = TRACK.n; return ((Math.round(s / DS) % n) + n) % n; };
+// Trazada ideal (desplazamiento lateral) en s
+export const lineAt = (s) => TRACK.line[idx(s)];
 // Punto del trazado a una distancia s y desplazamiento lateral (positivo = izquierda mirando hacia delante)
 function at(s, lat = 0) {
   const { L, n, P, T } = TRACK;
@@ -108,37 +120,64 @@ export function racePerf(entry) {
 }
 
 // ---------- Un coche en carrera (la física es la misma para jugadores y bots) ----------
+// El coche va solo por la trazada y acelera a fondo. Lo que no hace solo es FRENAR para las curvas
+// fuertes: si el jugador no frena (o frena tarde), llega pasado de velocidad y, según cuánto, se abre,
+// se va a la grava o hace un trompo. En las curvas suaves levanta el pie él solo.
 export class Racer {
   constructor(entry, grid, lane, { ai = null, seed = 1 } = {}) {
     this.id = entry.id; this.entry = entry;
     this.p = racePerf(entry);
     this.rng = mulberry32(seed);
     this.ai = ai;                 // { skill } en los bots
-    this.s = -grid; this.v = 0; this.lat = lane; this.latT = lane; this.lane = lane;
+    this.s = -grid; this.v = 0; this.lat = lane; this.latT = lane; this.pass = lane; this.passT = 0;
     this.nitro = 0.35; this.nitroOn = false;
     this.state = 'grid';          // grid · race · done · out
-    this.spinT = 0; this.spinYaw = 0;
-    this.braking = null; this.brakeQ = null; this.judged = null; this.vcJ = 0;
+    this.spinT = 0; this.spinYaw = 0; this.slip = 0; this.offT = 0;
+    this.braking = null; this.brakeQ = null; this.judged = null;
     this.lapStart = 0; this.laps = []; this.finishT = null; this.outT = null;
     this.launchT = null; this.jump = false; this.boost = 1;
-    this.feedback = [];           // avisos para el HUD (solo el coche propio)
+    this.feedback = [];
     this.drafting = false;
     this.lambda = this.p.blow > 0 ? -Math.log(1 - this.p.blow) / (LAPS * TRACK.L) : 0;
   }
   say(text, kind = 'info') { this.feedback.push({ text, kind }); }
-  vc(c) { return Math.min(this.p.vmax, Math.sqrt((this.p.mu * G * ARCADE * ARCADE) / c.kmax)); }
-  idealBrake(cs, vc) { return cs - Math.max(0, this.v * this.v - vc * vc) / (2 * this.p.brake); }
-  tolerance() { return 7 + 12 * (this.p.mu - 0.85) + this.v * 0.06; }
+  // Velocidad máxima en un punto: por la trazada la curva es más abierta; fuera de ella, más cerrada
+  limit(s, dev = 0) {
+    const i = idx(s);
+    const kk = TRACK.kLine[i] + (TRACK.kAxis[i] - TRACK.kLine[i]) * Math.min(1, Math.max(0, dev - 2.2) / 4);
+    return Math.min(this.p.vmax * 1.2, Math.sqrt((this.p.mu * G * ARCADE * ARCADE) / Math.max(kk, 1e-5)));
+  }
+  // Lo más lento que hay que ir en la curva (por la trazada)
+  target(a) { let v = 1e9; for (let x = a.cs; x <= a.ce; x += DS * 2) v = Math.min(v, this.limit(x)); return v; }
+  // ¿Esta curva pide frenar de verdad? (si basta con levantar el pie, el coche lo hace solo).
+  // Se decide al acercarse y se recuerda para toda la curva.
+  needsBrake(a) {
+    if (!this.need) this.need = new Map();
+    if (!this.need.has(a.key)) {
+      if (a.cs - this.s > 330) return this.target(a) < Math.min(this.v, this.p.vmax) * 0.9;
+      this.need.set(a.key, this.target(a) < Math.min(Math.max(this.v, 20), this.p.vmax) * 0.9);
+    }
+    return this.need.get(a.key);
+  }
+  // Último punto en el que se puede frenar para llegar bien a cada punto de la curva
+  idealBrake(a) {
+    let sb = Infinity;
+    for (let x = a.cs - 20; x <= a.ce; x += DS * 2) {
+      const vl = this.limit(x);
+      if (this.v > vl) sb = Math.min(sb, x - (this.v * this.v - vl * vl) / (2 * this.p.brake));
+    }
+    return sb === Infinity ? a.cs : sb;
+  }
+  tolerance() { return 6 + 12 * (this.p.mu - 0.85) + this.v * 0.05; }
 
-  // El jugador pulsa FRENAR: se frena para la curva que viene (si hace falta)
+  // El jugador pulsa FRENAR: frena para la curva que viene (si hace falta)
   pressBrake() {
     if (this.state !== 'race' || this.spinT > 0) return;
     const a = cornerAhead(this.s);
     if (!a || a.cs - this.s > 330 || this.s >= a.cs) return;
     if (this.braking === a.key) return;
-    const vc = this.vc(a.c);
-    if (this.v <= vc * 1.04) { this.say('Esta curva va a fondo', 'info'); return; }
-    const diff = this.idealBrake(a.cs, vc) - this.s; // > 0: has frenado antes del punto ideal
+    if (!this.needsBrake(a)) { this.say('Esta curva va a fondo', 'info'); return; }
+    const diff = this.idealBrake(a) - this.s; // > 0: has frenado antes del punto ideal
     const tol = this.tolerance();
     this.braking = a.key;
     this.brakeQ = Math.abs(diff) <= tol ? 'perfect' : diff > 0 ? 'early' : 'late';
@@ -158,31 +197,31 @@ export class Racer {
     }
   }
 
-  // Lo que hacen los bots: frenan con más o menos acierto según su nivel y gastan el nitro en recta
+  // Bots: frenan con más o menos acierto según su nivel y gastan el nitro en las rectas
   think(raceTime) {
     const ai = this.ai;
     if (this.launchT == null && raceTime >= ai.react) this.pressLaunch(raceTime, false);
     const a = cornerAhead(this.s);
     if (!a) return;
-    const vc = this.vc(a.c);
-    if (this.braking !== a.key && this.s < a.cs && this.v > vc * 1.04) {
+    if (this.braking !== a.key && this.s < a.cs && this.needsBrake(a)) {
       if (!ai.noise.has(a.key)) ai.noise.set(a.key, (this.rng() + this.rng() + this.rng() - 1.5) * 2 * (3 + 22 * (1 - ai.skill)) + 3 * (1 - ai.skill));
-      if (this.s >= this.idealBrake(a.cs, vc) - ai.noise.get(a.key)) this.pressBrake();
+      if (this.s >= this.idealBrake(a) - ai.noise.get(a.key)) this.pressBrake();
     }
     const far = a.cs - this.s;
-    if (!this.nitroOn && this.nitro > 0.5 && far > 260 && this.s < a.cs) this.nitroOn = true;
-    if (this.nitroOn && (this.nitro < 0.12 || far < 120)) this.nitroOn = false;
+    if (!this.nitroOn && this.nitro > 0.5 && far > 240 && this.s < a.cs) this.nitroOn = true;
+    if (this.nitroOn && (this.nitro < 0.12 || far < 110)) this.nitroOn = false;
   }
 
   update(dt, raceTime) {
     if (this.state === 'grid') return;
     const p = this.p;
-    if (this.state === 'out') { this.v = Math.max(0, this.v - 9 * dt); this.s += this.v * dt; this.latT = 6.2; this.nitroOn = false; return; }
-    if (this.state === 'done') { this.v += (24 - this.v) * Math.min(1, dt * 0.6); this.s += this.v * dt; this.nitroOn = false; return; }
+    const line = lineAt(this.s);
+    if (this.state === 'out') { this.v = Math.max(0, this.v - 9 * dt); this.s += this.v * dt; this.latT = W / 2 + 1.5; this.nitroOn = false; this.steerLat(dt); return; }
+    if (this.state === 'done') { this.v += (24 - this.v) * Math.min(1, dt * 0.6); this.s += this.v * dt; this.nitroOn = false; this.latT = line; this.steerLat(dt); return; }
     if (this.jump && raceTime < 1.2) return; // penalización por salida en falso
     if (this.spinT > 0) {
-      this.spinT -= dt; this.spinYaw += dt * 9 * (this.spinT > 0.3 ? 1 : this.spinT / 0.3);
-      this.v = Math.max(2, this.v - 22 * dt); this.s += this.v * dt; this.nitroOn = false;
+      this.spinT -= dt; this.spinYaw += dt * 8 * (this.spinT > 0.3 ? 1 : this.spinT / 0.3);
+      this.v = Math.max(2, this.v - 20 * dt); this.s += this.v * dt; this.nitroOn = false;
       if (this.spinT <= 0) this.spinYaw = 0;
       return;
     }
@@ -191,35 +230,54 @@ export class Racer {
     if (this.nitroOn) this.nitro = Math.max(0, this.nitro - 0.3 * dt);
     else this.nitro = Math.min(1, this.nitro + (0.025 + (this.drafting ? 0.1 : 0)) * dt);
     const a = cornerAhead(this.s);
-    const inCorner = a && this.s >= a.cs;
     const launch = this.launchT != null && raceTime - this.launchT < 2.5 ? this.boost : 1;
     const vmaxE = p.vmax * (this.nitroOn ? 1.16 : 1) * (this.drafting ? 1.07 : 1);
-    const acc = p.a0 * Math.max(0.05, 1 - this.v / vmaxE) * (this.nitroOn ? 1.7 : 1) * launch;
+    let acc = p.a0 * Math.max(0.05, 1 - this.v / vmaxE) * (this.nitroOn ? 1.7 : 1) * launch;
     if (this.launchT == null && raceTime > 1.0) { this.launchT = raceTime; this.boost = 1; } // nadie se queda parado
-    const s0 = this.s;
-    if (inCorner) {
-      if (this.judged !== a.key) this.judge(a);
-      const target = this.vcJ;
-      if (this.v > target) this.v = Math.max(target, this.v - p.brake * 1.6 * dt);
-      else this.v = Math.min(target, this.v + acc * dt);
-      // Nitro en curva: el coche se descoloca
-      if (this.nitroOn && this.rng() < (0.6 + p.spin) * dt) this.spin('¡Trompo por el nitro!');
-    } else if (a && this.braking === a.key) {
-      const vc = this.vc(a.c) * (this.brakeQ === 'perfect' ? 1.03 : 1);
-      this.v = this.v > vc ? Math.max(vc, this.v - p.brake * dt) : Math.min(vc, this.v + acc * dt);
-    } else {
-      this.v = Math.min(vmaxE, this.v + acc * dt);
+    // Por dónde va: la trazada, salvo que esté adelantando (se aparta un poco)
+    this.passT = Math.max(0, this.passT - dt);
+    if (this.passT <= 0) this.pass *= Math.max(0, 1 - dt * 0.8);
+    this.latT = Math.max(-EDGE - 0.6, Math.min(EDGE + 0.6, line + this.pass));
+    const dev = Math.abs(this.lat - line);
+    const lim = this.limit(this.s, dev);
+    const offTrack = Math.abs(this.lat) > W / 2 + 0.2;
+    if (offTrack) acc *= 0.35; // en la grava no hay tracción
+    const braked = a && this.braking === a.key && this.s < a.ce;
+    if (braked) {
+      // Frenada pedida para esta curva: frena fuerte hasta la velocidad de la curva
+      const tgt = this.target(a) * (this.brakeQ === 'perfect' ? 1.0 : 0.96);
+      if (this.v > tgt) this.v = Math.max(tgt, this.v - p.brake * dt);
+      else this.v = Math.min(tgt, this.v + acc * dt);
+    } else this.v = Math.min(vmaxE, this.v + acc * dt);
+    if (offTrack) this.v = Math.max(0, this.v - 10 * dt);
+    // ¿Va más rápido de lo que permite la curva en este punto?
+    const over = this.v / lim;
+    const hard = a && this.s >= a.cs - 6 && this.needsBrake(a);
+    if (hard && over > 1.06 && this.judged !== a.key) {
+      // Llega pasado: cuanto más, peor (se abre, se va a la grava o hace un trompo)
+      this.judged = a.key;
+      const out = (Math.sign(TRACK.kn[idx(this.s)]) || a.c.side) * EDGE;
+      if (over < 1.15) { this.v = lim * 0.78; this.offSide = out * 1.08; this.offT = 1.2; this.slip = -Math.sign(out) * 0.28; this.say('Te abres en la curva', 'warn'); }
+      else if (over < 1.32) { this.v = lim * 0.42; this.offSide = out + Math.sign(out) * 3.6; this.offT = 2.0; this.slip = -Math.sign(out) * 0.5; this.say('¡Te vas a la grava!', 'bad'); }
+      else this.spin('¡Trompo!');
     }
+    if (this.offT > 0) { this.offT -= dt; this.latT = this.offSide; this.sliding = true; } else this.sliding = false;
+    // Con el coche bajo control nunca pasa del límite (en curvas suaves levanta el pie solo)
+    if (this.spinT <= 0 && this.v > lim) this.v = Math.max(lim, this.v - p.brake * 1.2 * dt);
+    // Nitro en plena curva: el coche se descoloca
+    if (this.nitroOn && TRACK.kAxis[idx(this.s)] > CORNER_K * 1.6 && this.rng() < (0.55 + p.spin) * dt) this.spin('¡Trompo por el nitro!');
+    const s0 = this.s;
     this.s += this.v * dt;
-    // Salida de curva: si sobra potencia para el agarre, puede trompear (V2)
-    if (a && inCorner && this.s >= a.ce) {
+    if (!this.sliding) this.slip *= Math.max(0, 1 - dt * 2.2);
+    this.steerLat(dt);
+    // Salida de curva: si sobra potencia para el agarre, puede trompear (V2); se olvida la frenada
+    if (a && s0 < a.ce && this.s >= a.ce) {
       if (p.spin && this.rng() < p.spin * (this.nitroOn ? 2 : 0.5)) this.spin('¡Trompo: demasiada potencia!');
-      this.braking = null; this.brakeQ = null; this.latT = this.lane;
+      this.braking = null; this.brakeQ = null;
     }
     // Motor (V2): cuanto menos fiable, más papeletas de reventar; el nitro lo castiga
     if (this.lambda && this.rng() < this.lambda * (this.s - s0) * (this.nitroOn ? 3 : 1)) {
       this.state = 'out'; this.outT = raceTime; this.say('¡Te ha reventado el motor!', 'bad');
-      this.blown = true;
       return;
     }
     // Vueltas y meta
@@ -227,32 +285,31 @@ export class Racer {
     const lap = Math.floor(this.s / L), lap0 = Math.floor(s0 / L);
     if (lap > lap0 && s0 >= 0) {
       this.laps.push(raceTime - this.lapStart); this.lapStart = raceTime;
-      if (lap >= LAPS) { this.state = 'done'; this.finishT = raceTime - (this.s - lap * L) / Math.max(1, this.v); this.latT = this.lane; }
+      if (lap >= LAPS) { this.state = 'done'; this.finishT = raceTime - (this.s - lap * L) / Math.max(1, this.v); }
       else if (lap === LAPS - 1) this.say('¡Última vuelta!', 'info');
     }
   }
-  // Al entrar en la curva se ve si llegaba demasiado rápido
-  judge(a) {
-    this.judged = a.key;
-    const vc = this.vc(a.c), r = this.v / vc;
-    const out = -a.c.side * 5.6; // por fuera de la curva
-    if (r <= 1.06) { this.vcJ = vc * (this.braking === a.key && this.brakeQ === 'perfect' ? 1.03 : 1); if (this.braking === a.key && this.brakeQ === 'perfect') this.nitro = Math.min(1, this.nitro + 0.14); return; }
-    if (r <= 1.2) { this.vcJ = vc * 0.86; this.latT = out * 0.75; this.say('Te abres en la curva', 'warn'); return; }
-    if (r <= 1.42) { this.v = Math.min(this.v, vc * 0.6); this.vcJ = vc * 0.62; this.latT = out * 1.25; this.say('¡A la grava!', 'bad'); return; }
-    this.spin('¡Trompo!');
-    this.vcJ = vc * 0.7;
+  // Sólo se castiga el exceso en curvas que piden frenar; en las suaves basta con levantar el pie
+  needsBrakeOver(over) { return over > 1.04; }
+  // El volante: se acerca al carril deseado sin saltos (más despacio cuanto más rápido va)
+  steerLat(dt) {
+    const rate = 2.6 + 4 / Math.max(1, this.v / 10);
+    const d = this.latT - this.lat;
+    this.latV = Math.max(-rate, Math.min(rate, d * 2.4));
+    this.lat += this.latV * dt;
   }
-  spin(text) { this.spinT = 1.3; this.v = Math.min(this.v, 14); this.say(text, 'bad'); this.spinning = true; }
+  spin(text) { this.spinT = 1.3; this.v = Math.min(this.v, 14); this.say(text, 'bad'); }
+  // Adelantar: apartarse de la trazada hacia un lado durante un rato
+  overtake(side) { this.pass = side * 3.2; this.passT = 1.2; }
 
   // Ayuda de frenada para el HUD: cuánto falta para el punto ideal
   brakeHint() {
     if (this.state !== 'race' || this.spinT > 0) return null;
     const a = cornerAhead(this.s);
     if (!a || this.s >= a.cs || a.cs - this.s > 330) return null;
-    const vc = this.vc(a.c);
-    if (this.v <= vc * 1.04) return { flat: true, dist: a.cs - this.s };
+    if (!this.needsBrake(a)) return { flat: true, dist: a.cs - this.s };
     if (this.braking === a.key) return { done: true, q: this.brakeQ };
-    const d = this.idealBrake(a.cs, vc) - this.s, tol = this.tolerance();
+    const d = this.idealBrake(a) - this.s, tol = this.tolerance();
     return { d, tol, dist: a.cs - this.s };
   }
 }
@@ -334,16 +391,16 @@ export class RaceScene {
     const rnd = mulberry32(77);
     // Cielo y montañas lejanas
     const sky = new THREE.Mesh(new THREE.SphereGeometry(1400, 24, 16), new THREE.MeshBasicMaterial({ map: skyTex(), side: THREE.BackSide, fog: false, depthWrite: false }));
-    sky.position.set(130, 0, 120); g.add(sky);
+    sky.position.set(165, 0, 150); g.add(sky);
     const hillM = new THREE.MeshStandardMaterial({ color: '#7f9db0', roughness: 1, flatShading: true });
     for (let i = 0; i < 40; i++) {
       const a = (i / 40) * Math.PI * 2 + rnd() * 0.1, r = 900 + rnd() * 200, h = 90 + rnd() * 160;
       const m = new THREE.Mesh(new THREE.ConeGeometry(160 + rnd() * 140, h, 6), hillM);
-      m.position.set(130 + Math.cos(a) * r, h / 2 - 10, 120 + Math.sin(a) * r); g.add(m);
+      m.position.set(165 + Math.cos(a) * r, h / 2 - 10, 150 + Math.sin(a) * r); g.add(m);
     }
     // Césped
     const grass = new THREE.Mesh(new THREE.PlaneGeometry(2600, 2600).rotateX(-Math.PI / 2), mat('#4f7a3a', { roughness: 1 }));
-    grass.position.set(130, -0.03, 120); grass.receiveShadow = true; g.add(grass);
+    grass.position.set(165, -0.03, 150); grass.receiveShadow = true; g.add(grass);
     // Cintas a lo largo del trazado (suelo y muros), con coordenadas de textura a lo largo
     const ribbon = (l0, l1, y0, y1, material, uvLen = 0) => {
       const pos = [], uv = [], idx = [];
@@ -420,7 +477,7 @@ export class RaceScene {
     }
     const boards = { 150: new THREE.MeshBasicMaterial({ map: boardTex(150) }), 100: new THREE.MeshBasicMaterial({ map: boardTex(100) }), 50: new THREE.MeshBasicMaterial({ map: boardTex(50) }) };
     for (const c of TRACK.corners) {
-      const out = -c.side;
+      const out = c.side;
       for (const d of [150, 100, 50]) {
         const s = c.start - d;
         const { p, head } = at(s, out * (W / 2 + 3.4));
@@ -432,7 +489,7 @@ export class RaceScene {
     }
     // Muros de neumáticos en la escapatoria de las curvas
     const tyres = [];
-    for (const c of TRACK.corners) for (let s = c.start; s < c.end; s += 2.2) tyres.push(at(s, -c.side * (W / 2 + 6.1)).p);
+    for (const c of TRACK.corners) for (let s = c.start; s < c.end; s += 2.2) tyres.push(at(s, c.side * (W / 2 + 6.1)).p);
     const tyreMesh = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.45, 0.45, 0.9, 10), mat('#18191b', { roughness: 0.9 }), tyres.length);
     tyres.forEach((p, i) => tyreMesh.setMatrixAt(i, new THREE.Matrix4().setPosition(p.x, 0.45, p.z)));
     g.add(tyreMesh);
@@ -472,7 +529,7 @@ export class RaceScene {
     const trees = [];
     const near = (x, z) => { for (let i = 0; i < N; i += 4) { const p = TRACK.P[i]; if ((p.x - x) ** 2 + (p.z - z) ** 2 < 26 * 26) return true; } return false; };
     for (let i = 0; i < 900 && trees.length < 420; i++) {
-      const x = -320 + rnd() * 900, z = -200 + rnd() * 650;
+      const x = -170 + rnd() * 720, z = -170 + rnd() * 650;
       if (!near(x, z)) trees.push([x, z, 0.8 + rnd() * 0.9]);
     }
     const trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.25, 0.35, 2.4, 6), mat('#5b4330'), trees.length);
@@ -484,7 +541,7 @@ export class RaceScene {
     g.add(trunk, crown);
     // Luz propia
     this.sun = new THREE.DirectionalLight('#fff4e0', 0);
-    this.sun.position.set(200, 260, -150); this.sun.target.position.set(130, 0, 120);
+    this.sun.position.set(240, 280, -120); this.sun.target.position.set(165, 0, 150);
     this.hemi = new THREE.HemisphereLight('#cfe6ff', '#56703f', 0);
     g.add(this.sun, this.sun.target, this.hemi);
     // Efectos de cada coche: llama de nitro y luz de freno
@@ -611,7 +668,7 @@ export class RaceScene {
         const d = r.s - c.s;
         c.s = r.s; c.v = r.v; c.flags = this.flagsOf(r);
         if (r.finishT != null) c.finishT = r.finishT;
-        c.lat += (r.latT - c.lat) * Math.min(1, dt * 1.8); r.lat = c.lat;
+        c.latV = r.latV || 0; c.lat = r.lat; c.slip = r.slip;
         c.dist = d;
       } else if (c.buf.length) {
         const tt = now - 150;
@@ -619,7 +676,9 @@ export class RaceScene {
         for (let i = 0; i < c.buf.length - 1; i++) if (c.buf[i].t <= tt && c.buf[i + 1].t >= tt) { a = c.buf[i]; b = c.buf[i + 1]; break; }
         const f = b.t > a.t ? Math.min(1.5, Math.max(0, (tt - a.t) / (b.t - a.t))) : 1;
         const s = a.s + (b.s - a.s) * f;
-        c.dist = s - c.s; c.s = s; c.lat = a.lat + (b.lat - a.lat) * Math.min(1, f); c.v = b.v; c.flags = b.flags;
+        const lat = a.lat + (b.lat - a.lat) * Math.min(1, f);
+        c.latV = dt ? (lat - c.lat) / dt : 0;
+        c.dist = s - c.s; c.s = s; c.lat = lat; c.v = b.v; c.flags = b.flags;
       }
     }
     // Rebufo y adelantamientos (solo afectan a los coches que simulo)
@@ -633,9 +692,9 @@ export class RaceScene {
         if (o === c || (o.flags & 8)) continue;
         const gap = o.s - r.s, side = Math.abs(o.lat - c.lat);
         if (gap > 4 && gap < 24 && side < 2.6 && straight && r.v > 25) r.drafting = true;
-        if (gap > 0 && gap < 5.2 && side < 2.3) {
+        if (gap > 0 && gap < 5.5 && side < 2.3) {
           r.v = Math.min(r.v, o.v + 0.5);
-          r.latT = o.lat > 0 ? -3.4 : 3.4; r.lane = r.latT; // se abre para adelantar
+          if (r.passT <= 0) r.overtake(o.lat > lineAt(r.s) ? -1 : 1); // por el lado contrario al que lleva el de delante
         }
       }
     }
@@ -659,11 +718,21 @@ export class RaceScene {
     const r = c.local ? c.racer : null;
     const spinning = c.flags & 4;
     c.spinYaw = r ? r.spinYaw : spinning ? (c.spinYaw || 0) + dt * 9 : 0;
-    c.root.rotation.y = head + (c.spinYaw || 0);
-    // Balanceo: frenada (morro abajo) y aceleración
+    const v = Math.max(1, c.v || 0), kk = TRACK.kn[idx(c.s)];
+    const drift = Math.atan2(c.latV || 0, v) + (c.slip || 0);
+    const y0 = c.yaw ?? head, dy = head + drift - y0;
+    c.yaw = y0 + Math.atan2(Math.sin(dy), Math.cos(dy)) * (dt ? Math.min(1, dt * 10) : 1);
+    c.root.rotation.y = c.yaw + (c.spinYaw || 0);
+    // Cabeceo (frenada: morro abajo; nitro: morro arriba) y balanceo hacia el exterior de la curva
     const braking = c.flags & 2, nitro = c.flags & 1;
     c.body.rotation.z += (((braking ? -0.025 : 0) + (nitro ? 0.02 : 0)) - c.body.rotation.z) * Math.min(1, dt * 6);
-    for (const w of c.wheels) w.rotation.z += (w.position.z < 0 ? 1 : -1) * (c.dist || 0) / 0.36;
+    const roll = Math.max(-0.07, Math.min(0.07, v * v * kk * 0.004));
+    c.body.rotation.x += (roll - c.body.rotation.x) * Math.min(1, dt * 5);
+    const steer = Math.max(-0.5, Math.min(0.5, -kk * 2.8 + (c.latV || 0) * 0.04 - (c.slip || 0) * 1.2));
+    for (const w of c.wheels) {
+      w.rotation.z += (w.position.z < 0 ? 1 : -1) * (c.dist || 0) / 0.36;
+      if (w.position.x > 0) { if (w.userData.yaw0 == null) w.userData.yaw0 = w.rotation.y; w.rotation.y = w.userData.yaw0 + steer; }
+    }
     c.flame.material.opacity = nitro ? 0.6 + Math.random() * 0.4 : 0;
     c.flame.scale.set(1.2 + Math.random() * 1.2, 0.7 + Math.random() * 0.3, 1);
     c.brakeGlow.material.opacity = braking && c.v > 8 ? 0.8 : 0;

@@ -13,8 +13,8 @@ export const CART = new THREE.Vector3(-14.8, 0, -4.2);
 export const STATIONS = {
   tunnel: { x: -19, z: 11.5 },
   paint: { x: -2, z: 11.5 },
-  dyno: { x: 8, z: 11.5 },
-  qc: { x: 18, z: 11.5 },
+  qc: { x: 8, z: 11.5 },
+  dyno: { x: 18, z: 11.5 },
   stage: { x: 0, z: 0 },
   desk: { x: 10, z: -9.6 },
 };
@@ -321,8 +321,8 @@ export function buildGarage(scene) {
     for (let i = 0; i < 5; i++) { const b = box(0.12, 0.62, 0.03, steel); b.rotation.z = (i / 5) * Math.PI * 2; b.position.set(Math.sin((i / 5) * Math.PI * 2) * 0.3, Math.cos((i / 5) * Math.PI * 2) * 0.3, 0); fanG.add(b); }
     fanG.add(at(box(0.12, 0.9, 0.12, dark), 0, -0.85, 0));
     // A un lado (no en el camino hacia la siguiente zona) y apuntando al coche
-    fanG.rotation.y = Math.atan2(-3.4, -2.6);
-    fanG.position.set(st.x + 3.4, 1.25, st.z + 2.6);
+    fanG.rotation.y = Math.atan2(-3.4, 2.6);
+    fanG.position.set(st.x + 3.4, 1.25, st.z - 2.6);
     add(fanG);
   }
   // Calidad: carriles del arco escáner y pantalla de inspección
